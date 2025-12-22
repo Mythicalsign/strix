@@ -1,0 +1,217 @@
+<tools>
+  <tool name="create_custom_agent">
+    <description>Create a highly customizable sub-agent with advanced configuration options including root terminal access, custom capabilities, priority levels, and custom instructions.</description>
+    <details>This is an enhanced version of create_agent that allows the Main AI to create sub-agents with:
+- Root terminal access for privileged operations
+- Custom capability sets (terminal, browser, file_edit, etc.)
+- Priority-based execution (low, normal, high, critical)
+- Custom instructions injection
+- Configurable iteration limits and timeouts
+
+Sub-agents created with root_access=true can use the root_execute tool to perform privileged operations like installing packages, managing services, and accessing restricted files.</details>
+    <parameters>
+      <parameter name="task" type="string" required="true">
+        <description>The specific task/objective for the new agent to accomplish</description>
+      </parameter>
+      <parameter name="name" type="string" required="true">
+        <description>Human-readable name for the agent (for tracking purposes)</description>
+      </parameter>
+      <parameter name="capabilities" type="string" required="false">
+        <description>List of capabilities to grant: terminal, browser, file_edit, python, proxy, root_terminal (JSON array format)</description>
+      </parameter>
+      <parameter name="root_access" type="boolean" required="false">
+        <description>Whether to grant root terminal access (default: false)</description>
+      </parameter>
+      <parameter name="inherit_context" type="boolean" required="false">
+        <description>Whether the new agent should inherit parent's conversation history (default: true)</description>
+      </parameter>
+      <parameter name="prompt_modules" type="string" required="false">
+        <description>Comma-separated list of prompt modules to load (max 5)</description>
+      </parameter>
+      <parameter name="max_iterations" type="integer" required="false">
+        <description>Maximum iterations for the agent (default: 300)</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>Agent priority level: low, normal, high, critical (default: normal)</description>
+      </parameter>
+      <parameter name="timeout" type="integer" required="false">
+        <description>Custom timeout in seconds</description>
+      </parameter>
+      <parameter name="custom_instructions" type="string" required="false">
+        <description>Additional instructions to inject into the agent's context</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, agent_id, message, agent_info (id, name, status, root_access, priority, capabilities)</description>
+    </returns>
+    <examples>
+  # Create agent with root access for package installation
+  <function=create_custom_agent>
+  <parameter=task>Install and configure PostgreSQL database with secure settings</parameter>
+  <parameter=name>Database Setup Agent</parameter>
+  <parameter=root_access>true</parameter>
+  <parameter=priority>high</parameter>
+  <parameter=custom_instructions>Focus on security best practices. Configure PostgreSQL with proper authentication and encryption.</parameter>
+  </function>
+
+  # Create specialized security testing agent
+  <function=create_custom_agent>
+  <parameter=task>Perform comprehensive SQL injection testing on the login endpoint</parameter>
+  <parameter=name>SQLi Tester</parameter>
+  <parameter=capabilities>["terminal", "browser", "python", "proxy"]</parameter>
+  <parameter=prompt_modules>sql_injection</parameter>
+  <parameter=max_iterations>500</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="create_root_enabled_agent">
+    <description>Create a sub-agent with root terminal access enabled by default. Convenience function for creating privileged agents quickly.</description>
+    <details>This creates an agent with:
+- Full root/sudo terminal access via root_execute
+- All standard capabilities enabled
+- High priority execution
+- Pre-configured instructions explaining root capabilities
+
+Use this when you need a sub-agent that will definitely require privileged operations like package installation, service management, or database creation.</details>
+    <parameters>
+      <parameter name="task" type="string" required="true">
+        <description>The specific task/objective for the new agent</description>
+      </parameter>
+      <parameter name="name" type="string" required="true">
+        <description>Human-readable name for the agent</description>
+      </parameter>
+      <parameter name="inherit_context" type="boolean" required="false">
+        <description>Whether to inherit parent's conversation history (default: true)</description>
+      </parameter>
+      <parameter name="prompt_modules" type="string" required="false">
+        <description>Comma-separated list of prompt modules (max 5)</description>
+      </parameter>
+      <parameter name="custom_instructions" type="string" required="false">
+        <description>Additional instructions for the agent</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, agent_id, agent_info with root_access=true</description>
+    </returns>
+    <examples>
+  # Create agent to set up development environment
+  <function=create_root_enabled_agent>
+  <parameter=task>Set up a complete Python development environment with Django, PostgreSQL, and Redis</parameter>
+  <parameter=name>DevEnv Setup Agent</parameter>
+  <parameter=custom_instructions>Install all dependencies system-wide. Configure services to start automatically.</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="get_agent_capabilities">
+    <description>Get the capabilities and configuration of an agent.</description>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="false">
+        <description>ID of agent to query (default: current agent)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, agent_id, agent_name, capabilities, root_access, priority, custom_instructions, status, task</description>
+    </returns>
+    <examples>
+  <function=get_agent_capabilities>
+  <parameter=target_agent_id>agent_abc123</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="update_agent_capabilities">
+    <description>Update the capabilities and configuration of a running agent.</description>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="true">
+        <description>ID of agent to update</description>
+      </parameter>
+      <parameter name="capabilities" type="string" required="false">
+        <description>New capability list (JSON array format, replaces existing)</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>New priority level: low, normal, high, critical</description>
+      </parameter>
+      <parameter name="custom_instructions" type="string" required="false">
+        <description>Additional instructions to inject (agent will receive as message)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, agent_id, updates list, current_config</description>
+    </returns>
+    <examples>
+  <function=update_agent_capabilities>
+  <parameter=target_agent_id>agent_abc123</parameter>
+  <parameter=priority>critical</parameter>
+  <parameter=custom_instructions>Expedite completion. This is now urgent.</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="list_custom_agents">
+    <description>List all custom agents created by the system with their configurations and capabilities.</description>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, total_count, agents list (with details), root_enabled_count</description>
+    </returns>
+    <examples>
+  <function=list_custom_agents>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="terminate_custom_agent">
+    <description>Terminate a custom agent and clean up its configuration.</description>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="true">
+        <description>ID of agent to terminate</description>
+      </parameter>
+      <parameter name="force" type="boolean" required="false">
+        <description>If true, force immediate termination (default: false)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, message, agent_id</description>
+    </returns>
+    <examples>
+  <function=terminate_custom_agent>
+  <parameter=target_agent_id>agent_abc123</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="grant_root_access">
+    <description>Grant root terminal access to an existing agent. Only parent or root agent can grant access.</description>
+    <details>This allows dynamically upgrading an agent's privileges during runtime. The target agent will receive a notification about the access grant and can then use root_execute for privileged operations.</details>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="true">
+        <description>ID of agent to grant root access to</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, agent_id, message, agent_notified</description>
+    </returns>
+    <examples>
+  <function=grant_root_access>
+  <parameter=target_agent_id>agent_abc123</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="revoke_root_access">
+    <description>Revoke root terminal access from an agent. Only parent or root agent can revoke access.</description>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="true">
+        <description>ID of agent to revoke root access from</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, agent_id, had_access, message, agent_notified</description>
+    </returns>
+    <examples>
+  <function=revoke_root_access>
+  <parameter=target_agent_id>agent_abc123</parameter>
+  </function>
+    </examples>
+  </tool>
+</tools>

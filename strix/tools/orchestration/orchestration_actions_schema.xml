@@ -1,0 +1,500 @@
+<tools>
+  <!-- Task Management -->
+  <tool name="create_task">
+    <description>Create a new orchestrated task with priority, estimated effort, and deadline.</description>
+    <parameters>
+      <parameter name="title" type="string" required="true">
+        <description>Task title</description>
+      </parameter>
+      <parameter name="description" type="string" required="true">
+        <description>Detailed task description</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>Priority: critical, high, medium, low (default: medium)</description>
+      </parameter>
+      <parameter name="estimated_effort" type="string" required="false">
+        <description>Estimated effort (e.g., "1h", "2d")</description>
+      </parameter>
+      <parameter name="deadline" type="string" required="false">
+        <description>ISO date deadline</description>
+      </parameter>
+      <parameter name="tags" type="string" required="false">
+        <description>Tags for categorization (JSON array)</description>
+      </parameter>
+      <parameter name="auto_assign" type="boolean" required="false">
+        <description>Auto-assign to least busy agent (default: false)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Task creation status with task_id</description>
+    </returns>
+  </tool>
+
+  <tool name="assign_task">
+    <description>Assign a task to a specific agent with capacity checking.</description>
+    <parameters>
+      <parameter name="task_id" type="string" required="true">
+        <description>Task to assign</description>
+      </parameter>
+      <parameter name="target_agent_id" type="string" required="true">
+        <description>Agent to assign to</description>
+      </parameter>
+      <parameter name="notify" type="boolean" required="false">
+        <description>Send notification (default: true)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Assignment status</description>
+    </returns>
+  </tool>
+
+  <tool name="update_task_status">
+    <description>Update task status with optional result and notes.</description>
+    <parameters>
+      <parameter name="task_id" type="string" required="true">
+        <description>Task to update</description>
+      </parameter>
+      <parameter name="status" type="string" required="true">
+        <description>Status: pending, assigned, in_progress, completed, failed, blocked</description>
+      </parameter>
+      <parameter name="result" type="string" required="false">
+        <description>Result description</description>
+      </parameter>
+      <parameter name="notes" type="string" required="false">
+        <description>Additional notes</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Update status</description>
+    </returns>
+  </tool>
+
+  <tool name="get_task_status">
+    <description>Get detailed task status with dependencies.</description>
+    <parameters>
+      <parameter name="task_id" type="string" required="true">
+        <description>Task to query</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Task details with dependencies</description>
+    </returns>
+  </tool>
+
+  <tool name="list_tasks">
+    <description>List tasks with filtering options.</description>
+    <parameters>
+      <parameter name="status" type="string" required="false">
+        <description>Filter by status</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>Filter by priority</description>
+      </parameter>
+      <parameter name="assigned_to" type="string" required="false">
+        <description>Filter by assignee</description>
+      </parameter>
+      <parameter name="created_by" type="string" required="false">
+        <description>Filter by creator</description>
+      </parameter>
+      <parameter name="limit" type="integer" required="false">
+        <description>Max results (default: 50)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Filtered tasks list</description>
+    </returns>
+  </tool>
+
+  <tool name="create_task_dependency">
+    <description>Create a dependency between tasks (with circular dependency detection).</description>
+    <parameters>
+      <parameter name="task_id" type="string" required="true">
+        <description>Task that has the dependency</description>
+      </parameter>
+      <parameter name="depends_on_task_id" type="string" required="true">
+        <description>Task that must complete first</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Dependency creation status</description>
+    </returns>
+  </tool>
+
+  <tool name="get_task_dependencies">
+    <description>Get dependencies and dependents of a task.</description>
+    <parameters>
+      <parameter name="task_id" type="string" required="true">
+        <description>Task to query</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Dependencies, dependents, and blocking status</description>
+    </returns>
+  </tool>
+
+  <!-- Priority Queue -->
+  <tool name="get_priority_queue">
+    <description>Get the current priority queue of pending tasks.</description>
+    <returns type="Dict[str, Any]">
+      <description>Ordered task queue</description>
+    </returns>
+  </tool>
+
+  <tool name="reorder_priority">
+    <description>Change task priority and reorder the queue.</description>
+    <parameters>
+      <parameter name="task_id" type="string" required="true">
+        <description>Task to reprioritize</description>
+      </parameter>
+      <parameter name="new_priority" type="string" required="true">
+        <description>New priority: critical, high, medium, low</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Reorder status with new queue position</description>
+    </returns>
+  </tool>
+
+  <!-- Workload Management -->
+  <tool name="get_agent_workload">
+    <description>Get agent's current workload and utilization.</description>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="false">
+        <description>Agent to query (default: current)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Workload info with utilization and task breakdown</description>
+    </returns>
+  </tool>
+
+  <tool name="balance_workload">
+    <description>Balance workload by assigning tasks to least busy agents.</description>
+    <parameters>
+      <parameter name="task_ids" type="string" required="false">
+        <description>Specific tasks to assign (JSON array, default: all unassigned)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Assignment results</description>
+    </returns>
+  </tool>
+
+  <tool name="set_agent_capacity">
+    <description>Set max concurrent task capacity for an agent (1-20).</description>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="true">
+        <description>Agent to configure</description>
+      </parameter>
+      <parameter name="capacity" type="integer" required="true">
+        <description>Max concurrent tasks (1-20)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Configuration status</description>
+    </returns>
+  </tool>
+
+  <!-- Team Management -->
+  <tool name="create_agent_team">
+    <description>Create a team of agents for coordinated work.</description>
+    <parameters>
+      <parameter name="name" type="string" required="true">
+        <description>Team name</description>
+      </parameter>
+      <parameter name="description" type="string" required="false">
+        <description>Team description</description>
+      </parameter>
+      <parameter name="initial_members" type="string" required="false">
+        <description>Initial member agent IDs (JSON array)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Team creation status with team_id</description>
+    </returns>
+  </tool>
+
+  <tool name="add_to_team">
+    <description>Add an agent to a team.</description>
+    <parameters>
+      <parameter name="team_id" type="string" required="true">
+        <description>Team to add to</description>
+      </parameter>
+      <parameter name="agent_id" type="string" required="true">
+        <description>Agent to add</description>
+      </parameter>
+      <parameter name="role" type="string" required="false">
+        <description>Role: member, specialist, coordinator (default: member)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Addition status</description>
+    </returns>
+  </tool>
+
+  <tool name="remove_from_team">
+    <description>Remove an agent from a team.</description>
+    <parameters>
+      <parameter name="team_id" type="string" required="true">
+        <description>Team to remove from</description>
+      </parameter>
+      <parameter name="agent_id" type="string" required="true">
+        <description>Agent to remove</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Removal status</description>
+    </returns>
+  </tool>
+
+  <tool name="dissolve_team">
+    <description>Dissolve a team and notify all members.</description>
+    <parameters>
+      <parameter name="team_id" type="string" required="true">
+        <description>Team to dissolve</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Dissolution status</description>
+    </returns>
+  </tool>
+
+  <tool name="list_teams">
+    <description>List all teams.</description>
+    <returns type="Dict[str, Any]">
+      <description>Teams list</description>
+    </returns>
+  </tool>
+
+  <tool name="get_team_status">
+    <description>Get detailed team status with member workloads.</description>
+    <parameters>
+      <parameter name="team_id" type="string" required="true">
+        <description>Team to query</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Team details with member status</description>
+    </returns>
+  </tool>
+
+  <!-- Coordination -->
+  <tool name="broadcast_message">
+    <description>Broadcast a message to multiple agents or a team.</description>
+    <parameters>
+      <parameter name="message" type="string" required="true">
+        <description>Message to broadcast</description>
+      </parameter>
+      <parameter name="target_agents" type="string" required="false">
+        <description>Specific agents (JSON array, default: all)</description>
+      </parameter>
+      <parameter name="team_id" type="string" required="false">
+        <description>Send to all team members</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>Priority: low, normal, high, urgent</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Broadcast status</description>
+    </returns>
+  </tool>
+
+  <tool name="request_coordination">
+    <description>Request coordination with another agent.</description>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="true">
+        <description>Agent to coordinate with</description>
+      </parameter>
+      <parameter name="coordination_type" type="string" required="true">
+        <description>Type: assistance, review, approval, handoff, sync</description>
+      </parameter>
+      <parameter name="description" type="string" required="true">
+        <description>Description of what's needed</description>
+      </parameter>
+      <parameter name="urgency" type="string" required="false">
+        <description>Urgency: low, normal, high, critical</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Request status with coordination_id</description>
+    </returns>
+  </tool>
+
+  <tool name="synchronize_agents">
+    <description>Create a synchronization point for multiple agents.</description>
+    <parameters>
+      <parameter name="agent_ids" type="string" required="true">
+        <description>Agents to synchronize (JSON array)</description>
+      </parameter>
+      <parameter name="sync_point" type="string" required="true">
+        <description>Description of the sync point</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Sync status with checkpoint_id</description>
+    </returns>
+  </tool>
+
+  <tool name="create_checkpoint">
+    <description>Create a checkpoint for agent synchronization.</description>
+    <parameters>
+      <parameter name="checkpoint_id" type="string" required="true">
+        <description>Unique checkpoint ID</description>
+      </parameter>
+      <parameter name="description" type="string" required="true">
+        <description>Checkpoint description</description>
+      </parameter>
+      <parameter name="required_agents" type="string" required="false">
+        <description>Agents that must reach this checkpoint (JSON array)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Checkpoint creation status</description>
+    </returns>
+  </tool>
+
+  <tool name="wait_for_checkpoint">
+    <description>Wait at a checkpoint until all required agents arrive.</description>
+    <parameters>
+      <parameter name="checkpoint_id" type="string" required="true">
+        <description>Checkpoint to wait at</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Checkpoint status with waiting agents</description>
+    </returns>
+  </tool>
+
+  <!-- Health & Monitoring -->
+  <tool name="get_agent_health">
+    <description>Get health status of an agent (healthy, busy, overloaded, degraded, critical).</description>
+    <parameters>
+      <parameter name="target_agent_id" type="string" required="false">
+        <description>Agent to check (default: current)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Health info with utilization</description>
+    </returns>
+  </tool>
+
+  <tool name="get_system_metrics">
+    <description>Get overall system orchestration metrics.</description>
+    <returns type="Dict[str, Any]">
+      <description>System-wide metrics: agents, tasks, teams, uptime</description>
+    </returns>
+  </tool>
+
+  <tool name="get_orchestration_dashboard">
+    <description>Get a comprehensive orchestration dashboard view.</description>
+    <returns type="Dict[str, Any]">
+      <description>Dashboard with metrics, queue, teams, and agent health</description>
+    </returns>
+  </tool>
+
+  <!-- Resource Management -->
+  <tool name="allocate_resource">
+    <description>Allocate a resource to the current agent.</description>
+    <parameters>
+      <parameter name="resource_name" type="string" required="true">
+        <description>Resource name</description>
+      </parameter>
+      <parameter name="resource_type" type="string" required="true">
+        <description>Type: database, service, file, network, etc.</description>
+      </parameter>
+      <parameter name="exclusive" type="boolean" required="false">
+        <description>Exclusive allocation (default: false)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Allocation status with resource_id</description>
+    </returns>
+  </tool>
+
+  <tool name="release_resource">
+    <description>Release a resource allocation.</description>
+    <parameters>
+      <parameter name="resource_id" type="string" required="true">
+        <description>Resource to release</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Release status</description>
+    </returns>
+  </tool>
+
+  <tool name="list_resources">
+    <description>List all resources and their allocation status.</description>
+    <returns type="Dict[str, Any]">
+      <description>Resources list with availability</description>
+    </returns>
+  </tool>
+
+  <!-- Workflow Management -->
+  <tool name="create_workflow">
+    <description>Create a workflow with ordered steps and dependencies.</description>
+    <parameters>
+      <parameter name="name" type="string" required="true">
+        <description>Workflow name</description>
+      </parameter>
+      <parameter name="description" type="string" required="true">
+        <description>Workflow description</description>
+      </parameter>
+      <parameter name="steps" type="string" required="true">
+        <description>Steps JSON array: [{name, task_template, depends_on?, priority?, auto_assign?}]</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Workflow creation status with workflow_id</description>
+    </returns>
+  </tool>
+
+  <tool name="execute_workflow">
+    <description>Execute a workflow, creating tasks for each step.</description>
+    <parameters>
+      <parameter name="workflow_id" type="string" required="true">
+        <description>Workflow to execute</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Execution status with task IDs</description>
+    </returns>
+  </tool>
+
+  <tool name="get_workflow_status">
+    <description>Get workflow status with execution details.</description>
+    <parameters>
+      <parameter name="workflow_id" type="string" required="true">
+        <description>Workflow to query</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Workflow and execution status</description>
+    </returns>
+  </tool>
+
+  <tool name="pause_workflow">
+    <description>Pause a running workflow.</description>
+    <parameters>
+      <parameter name="workflow_id" type="string" required="true">
+        <description>Workflow to pause</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Pause status</description>
+    </returns>
+  </tool>
+
+  <tool name="resume_workflow">
+    <description>Resume a paused workflow.</description>
+    <parameters>
+      <parameter name="workflow_id" type="string" required="true">
+        <description>Workflow to resume</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Resume status</description>
+    </returns>
+  </tool>
+</tools>

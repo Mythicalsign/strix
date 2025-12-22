@@ -1,0 +1,444 @@
+<tools>
+  <!-- Core Knowledge Operations -->
+  <tool name="create_knowledge_entry">
+    <description>Create a new knowledge entry with advanced metadata, priority, and organization features.</description>
+    <details>Create structured knowledge entries with:
+- Multiple categories (findings, methodology, questions, etc.)
+- Priority levels (critical, high, medium, low)
+- Tags for flexible categorization
+- Custom metadata for structured data
+- Optional collection assignment</details>
+    <parameters>
+      <parameter name="title" type="string" required="true">
+        <description>Title of the knowledge entry</description>
+      </parameter>
+      <parameter name="content" type="string" required="true">
+        <description>Main content (supports markdown)</description>
+      </parameter>
+      <parameter name="category" type="string" required="false">
+        <description>Category: general, findings, methodology, questions, plan, reconnaissance, exploitation, credentials, research</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>Priority level: critical, high, medium, low (default: medium)</description>
+      </parameter>
+      <parameter name="tags" type="string" required="false">
+        <description>Tags for categorization (JSON array format)</description>
+      </parameter>
+      <parameter name="metadata" type="string" required="false">
+        <description>Additional structured metadata (JSON object format)</description>
+      </parameter>
+      <parameter name="collection_id" type="string" required="false">
+        <description>Collection to add entry to</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, entry_id, message, category, priority</description>
+    </returns>
+    <examples>
+  <function=create_knowledge_entry>
+  <parameter=title>SQL Injection in Login Form</parameter>
+  <parameter=content>Found SQL injection vulnerability in /login.php username parameter. Payload: admin' OR '1'='1' --</parameter>
+  <parameter=category>findings</parameter>
+  <parameter=priority>critical</parameter>
+  <parameter=tags>["sqli", "authentication", "critical"]</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="get_knowledge_entry">
+    <description>Get a knowledge entry by ID with full details including related entries.</description>
+    <parameters>
+      <parameter name="entry_id" type="string" required="true">
+        <description>ID of the entry to retrieve</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, entry_id, entry data, related_entries, history_count</description>
+    </returns>
+  </tool>
+
+  <tool name="update_knowledge_entry">
+    <description>Update an existing knowledge entry with version tracking.</description>
+    <parameters>
+      <parameter name="entry_id" type="string" required="true">
+        <description>ID of the entry to update</description>
+      </parameter>
+      <parameter name="title" type="string" required="false">
+        <description>New title</description>
+      </parameter>
+      <parameter name="content" type="string" required="false">
+        <description>New content</description>
+      </parameter>
+      <parameter name="category" type="string" required="false">
+        <description>New category</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>New priority</description>
+      </parameter>
+      <parameter name="tags" type="string" required="false">
+        <description>New tags (JSON array)</description>
+      </parameter>
+      <parameter name="metadata" type="string" required="false">
+        <description>New metadata (merged with existing)</description>
+      </parameter>
+      <parameter name="append_content" type="boolean" required="false">
+        <description>If true, append content instead of replacing</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, entry_id, updates list, version</description>
+    </returns>
+  </tool>
+
+  <tool name="delete_knowledge_entry">
+    <description>Delete a knowledge entry.</description>
+    <parameters>
+      <parameter name="entry_id" type="string" required="true">
+        <description>ID of the entry to delete</description>
+      </parameter>
+      <parameter name="hard_delete" type="boolean" required="false">
+        <description>If true, permanently delete including history</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, entry_id, message</description>
+    </returns>
+  </tool>
+
+  <!-- Advanced Search -->
+  <tool name="search_knowledge">
+    <description>Search knowledge entries with relevance ranking and filtering.</description>
+    <parameters>
+      <parameter name="query" type="string" required="true">
+        <description>Search query (searches title, content, tags)</description>
+      </parameter>
+      <parameter name="category" type="string" required="false">
+        <description>Filter by category</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>Filter by priority</description>
+      </parameter>
+      <parameter name="tags" type="string" required="false">
+        <description>Filter by tags (JSON array)</description>
+      </parameter>
+      <parameter name="limit" type="integer" required="false">
+        <description>Maximum results (default: 20)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, query, total_results, results (with relevance scores)</description>
+    </returns>
+    <examples>
+  <function=search_knowledge>
+  <parameter=query>SQL injection authentication</parameter>
+  <parameter=category>findings</parameter>
+  <parameter=priority>critical</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="advanced_search">
+    <description>Advanced search with multiple filters, date ranges, sorting, and pagination.</description>
+    <parameters>
+      <parameter name="query" type="string" required="false">
+        <description>Optional text query</description>
+      </parameter>
+      <parameter name="category" type="string" required="false">
+        <description>Filter by multiple categories (JSON array)</description>
+      </parameter>
+      <parameter name="priority" type="string" required="false">
+        <description>Filter by multiple priorities (JSON array)</description>
+      </parameter>
+      <parameter name="tags" type="string" required="false">
+        <description>Filter by tags - AND logic (JSON array)</description>
+      </parameter>
+      <parameter name="created_after" type="string" required="false">
+        <description>ISO date - entries after this date</description>
+      </parameter>
+      <parameter name="created_before" type="string" required="false">
+        <description>ISO date - entries before this date</description>
+      </parameter>
+      <parameter name="has_links" type="boolean" required="false">
+        <description>Filter entries with/without links</description>
+      </parameter>
+      <parameter name="metadata_filter" type="string" required="false">
+        <description>Filter by metadata fields (JSON object)</description>
+      </parameter>
+      <parameter name="sort_by" type="string" required="false">
+        <description>Sort field: relevance, created_at, updated_at, priority, title</description>
+      </parameter>
+      <parameter name="sort_order" type="string" required="false">
+        <description>Sort order: asc, desc</description>
+      </parameter>
+      <parameter name="limit" type="integer" required="false">
+        <description>Maximum results (default: 50)</description>
+      </parameter>
+      <parameter name="offset" type="integer" required="false">
+        <description>Pagination offset</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with results and pagination info</description>
+    </returns>
+  </tool>
+
+  <!-- Relationships and Linking -->
+  <tool name="link_entries">
+    <description>Create a typed link between two knowledge entries.</description>
+    <parameters>
+      <parameter name="source_id" type="string" required="true">
+        <description>Source entry ID</description>
+      </parameter>
+      <parameter name="target_id" type="string" required="true">
+        <description>Target entry ID</description>
+      </parameter>
+      <parameter name="relationship_type" type="string" required="false">
+        <description>Type: related_to, depends_on, blocks, references, contradicts, confirms, supersedes, extends</description>
+      </parameter>
+      <parameter name="bidirectional" type="boolean" required="false">
+        <description>Create link in both directions (default: true)</description>
+      </parameter>
+      <parameter name="description" type="string" required="false">
+        <description>Description of the relationship</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with link creation status</description>
+    </returns>
+    <examples>
+  <function=link_entries>
+  <parameter=source_id>ke_abc123</parameter>
+  <parameter=target_id>ke_def456</parameter>
+  <parameter=relationship_type>confirms</parameter>
+  <parameter=description>PoC confirms the vulnerability</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="unlink_entries">
+    <description>Remove a link between two entries.</description>
+    <parameters>
+      <parameter name="source_id" type="string" required="true">
+        <description>Source entry ID</description>
+      </parameter>
+      <parameter name="target_id" type="string" required="true">
+        <description>Target entry ID</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with unlink status</description>
+    </returns>
+  </tool>
+
+  <tool name="get_related_entries">
+    <description>Get all entries related to a specific entry, with configurable traversal depth.</description>
+    <parameters>
+      <parameter name="entry_id" type="string" required="true">
+        <description>Entry ID to find relations for</description>
+      </parameter>
+      <parameter name="relationship_type" type="string" required="false">
+        <description>Filter by relationship type</description>
+      </parameter>
+      <parameter name="depth" type="integer" required="false">
+        <description>Traversal depth 1-3 (default: 1)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with related entries at each depth level</description>
+    </returns>
+  </tool>
+
+  <!-- Collections -->
+  <tool name="create_knowledge_collection">
+    <description>Create a collection (folder) for organizing knowledge entries with optional nesting.</description>
+    <parameters>
+      <parameter name="name" type="string" required="true">
+        <description>Collection name</description>
+      </parameter>
+      <parameter name="description" type="string" required="false">
+        <description>Collection description</description>
+      </parameter>
+      <parameter name="parent_collection_id" type="string" required="false">
+        <description>Parent collection for nested organization</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with collection_id and creation status</description>
+    </returns>
+  </tool>
+
+  <tool name="add_to_collection">
+    <description>Add entries to a collection.</description>
+    <parameters>
+      <parameter name="collection_id" type="string" required="true">
+        <description>Collection ID</description>
+      </parameter>
+      <parameter name="entry_ids" type="string" required="true">
+        <description>Entry IDs to add (JSON array)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with add status</description>
+    </returns>
+  </tool>
+
+  <tool name="remove_from_collection">
+    <description>Remove entries from a collection.</description>
+    <parameters>
+      <parameter name="collection_id" type="string" required="true">
+        <description>Collection ID</description>
+      </parameter>
+      <parameter name="entry_ids" type="string" required="true">
+        <description>Entry IDs to remove (JSON array)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with removal status</description>
+    </returns>
+  </tool>
+
+  <tool name="list_collections">
+    <description>List all knowledge collections.</description>
+    <returns type="Dict[str, Any]">
+      <description>Response with all collections and their metadata</description>
+    </returns>
+  </tool>
+
+  <!-- Export/Import -->
+  <tool name="export_knowledge">
+    <description>Export knowledge entries to JSON or Markdown format.</description>
+    <parameters>
+      <parameter name="format_type" type="string" required="false">
+        <description>Export format: json, markdown (default: json)</description>
+      </parameter>
+      <parameter name="entry_ids" type="string" required="false">
+        <description>Specific entries to export (JSON array, default: all)</description>
+      </parameter>
+      <parameter name="collection_id" type="string" required="false">
+        <description>Export entire collection</description>
+      </parameter>
+      <parameter name="include_relationships" type="boolean" required="false">
+        <description>Include entry relationships (default: true)</description>
+      </parameter>
+      <parameter name="include_history" type="boolean" required="false">
+        <description>Include version history (default: false)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with exported content</description>
+    </returns>
+  </tool>
+
+  <tool name="import_knowledge">
+    <description>Import knowledge entries from JSON format.</description>
+    <parameters>
+      <parameter name="content" type="string" required="true">
+        <description>JSON content to import</description>
+      </parameter>
+      <parameter name="format_type" type="string" required="false">
+        <description>Import format: json (default: json)</description>
+      </parameter>
+      <parameter name="overwrite_existing" type="boolean" required="false">
+        <description>Overwrite entries with same ID (default: false)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with import status and counts</description>
+    </returns>
+  </tool>
+
+  <!-- Templates -->
+  <tool name="create_from_template">
+    <description>Create a knowledge entry from a predefined template (vulnerability, methodology, credential, endpoint, research).</description>
+    <parameters>
+      <parameter name="template_name" type="string" required="true">
+        <description>Template: vulnerability, methodology, credential, endpoint, research</description>
+      </parameter>
+      <parameter name="data" type="string" required="true">
+        <description>Data to populate template (JSON object with title and template fields)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with created entry</description>
+    </returns>
+    <examples>
+  <function=create_from_template>
+  <parameter=template_name>vulnerability</parameter>
+  <parameter=data>{"title": "XSS in Search", "severity": "high", "affected_component": "/search", "description": "Reflected XSS", "poc": "<script>alert(1)</script>", "remediation": "Sanitize input"}</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="list_templates">
+    <description>List all available knowledge templates with their schemas.</description>
+    <returns type="Dict[str, Any]">
+      <description>Response with template information</description>
+    </returns>
+  </tool>
+
+  <!-- Versioning -->
+  <tool name="get_entry_history">
+    <description>Get the version history of a knowledge entry.</description>
+    <parameters>
+      <parameter name="entry_id" type="string" required="true">
+        <description>Entry ID</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with version history</description>
+    </returns>
+  </tool>
+
+  <tool name="revert_entry">
+    <description>Revert an entry to a previous version.</description>
+    <parameters>
+      <parameter name="entry_id" type="string" required="true">
+        <description>Entry ID</description>
+      </parameter>
+      <parameter name="version" type="integer" required="true">
+        <description>Version number to revert to</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with revert status</description>
+    </returns>
+  </tool>
+
+  <!-- Sharing -->
+  <tool name="share_with_agent">
+    <description>Share knowledge entries with another agent.</description>
+    <parameters>
+      <parameter name="entry_ids" type="string" required="true">
+        <description>Entry IDs to share (JSON array)</description>
+      </parameter>
+      <parameter name="target_agent_id" type="string" required="true">
+        <description>Agent ID to share with</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response with sharing status</description>
+    </returns>
+  </tool>
+
+  <tool name="get_shared_knowledge">
+    <description>Get knowledge entries shared with the current agent.</description>
+    <returns type="Dict[str, Any]">
+      <description>Response with shared entries</description>
+    </returns>
+  </tool>
+
+  <!-- Analytics -->
+  <tool name="get_knowledge_stats">
+    <description>Get statistics about the knowledge base (totals, distributions, top tags).</description>
+    <returns type="Dict[str, Any]">
+      <description>Response with knowledge base statistics</description>
+    </returns>
+  </tool>
+
+  <tool name="get_knowledge_graph">
+    <description>Get the knowledge graph structure for visualization (nodes and edges).</description>
+    <returns type="Dict[str, Any]">
+      <description>Response with nodes and edges for graph visualization</description>
+    </returns>
+  </tool>
+</tools>

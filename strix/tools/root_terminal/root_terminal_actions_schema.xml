@@ -1,0 +1,324 @@
+<tools>
+  <tool name="root_execute">
+    <description>Execute a command with root/sudo privileges. This is the primary command execution tool for the Main AI agent, providing full root access to the system for installing tools, libraries, scripts, databases, and performing any privileged operations.</description>
+    <details>Use this tool for any command that requires elevated privileges. Commands are automatically prefixed with sudo unless they are safe read-only commands (ls, cat, pwd, etc.).
+    
+The Main AI has full root access and can:
+- Install any system packages, libraries, or tools
+- Create and manage databases
+- Start/stop system services
+- Execute scripts with elevated privileges
+- Modify system configurations
+- Access any file or directory</details>
+    <parameters>
+      <parameter name="command" type="string" required="true">
+        <description>The command to execute with root privileges</description>
+      </parameter>
+      <parameter name="is_input" type="boolean" required="false">
+        <description>Whether this is input to a running command (default: false)</description>
+      </parameter>
+      <parameter name="timeout" type="float" required="false">
+        <description>Execution timeout in seconds (default: 60)</description>
+      </parameter>
+      <parameter name="terminal_id" type="string" required="false">
+        <description>Specific terminal to use (default: root_default)</description>
+      </parameter>
+      <parameter name="no_enter" type="boolean" required="false">
+        <description>If true, don't send Enter after command (default: false)</description>
+      </parameter>
+      <parameter name="use_sudo" type="boolean" required="false">
+        <description>If true, automatically prepend sudo for privileged commands (default: true)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: content (output), command, terminal_id, status, exit_code, working_dir, is_root</description>
+    </returns>
+    <examples>
+  # Install a package
+  <function=root_execute>
+  <parameter=command>apt-get install -y nmap</parameter>
+  </function>
+
+  # Start a service
+  <function=root_execute>
+  <parameter=command>systemctl start postgresql</parameter>
+  </function>
+
+  # Execute with longer timeout
+  <function=root_execute>
+  <parameter=command>pip install tensorflow</parameter>
+  <parameter=timeout>300</parameter>
+  </function>
+
+  # Run in specific terminal
+  <function=root_execute>
+  <parameter=command>docker-compose up -d</parameter>
+  <parameter=terminal_id>root_temp_1</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="create_root_terminal">
+    <description>Create a new temporary root terminal session (up to 7 maximum). This allows the Main AI to have multiple parallel root terminals for concurrent operations.</description>
+    <details>The Main AI can create up to 7 temporary root terminals in addition to the default terminal. Each terminal operates independently and can run different commands simultaneously. Use this for parallel operations like running multiple services or concurrent installations.</details>
+    <parameters>
+      <parameter name="terminal_name" type="string" required="false">
+        <description>Optional custom name for the terminal</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, terminal_id, active_terminals, max_terminals, remaining_slots</description>
+    </returns>
+    <examples>
+  # Create a numbered terminal
+  <function=create_root_terminal>
+  </function>
+
+  # Create a named terminal
+  <function=create_root_terminal>
+  <parameter=terminal_name>database_ops</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="list_root_terminals">
+    <description>List all active root terminal sessions with their status.</description>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: sessions (dict of terminal info), total_count, temporary_count, max_temporary, available_slots</description>
+    </returns>
+    <examples>
+  <function=list_root_terminals>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="close_root_terminal">
+    <description>Close a specific root terminal session. Note: Cannot close the default root terminal.</description>
+    <parameters>
+      <parameter name="terminal_id" type="string" required="true">
+        <description>ID of the terminal to close</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: terminal_id, message/error, status, remaining_terminals</description>
+    </returns>
+    <examples>
+  <function=close_root_terminal>
+  <parameter=terminal_id>root_temp_1</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="close_all_root_terminals">
+    <description>Close all temporary root terminals (keeps default terminal active).</description>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, closed_terminals list, errors, remaining_slots</description>
+    </returns>
+    <examples>
+  <function=close_all_root_terminals>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="get_root_terminal_status">
+    <description>Get detailed status of a root terminal.</description>
+    <parameters>
+      <parameter name="terminal_id" type="string" required="false">
+        <description>Terminal ID to check (default: root_default)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: terminal_id, is_running, working_dir, is_default, is_temporary, is_root</description>
+    </returns>
+    <examples>
+  <function=get_root_terminal_status>
+  <parameter=terminal_id>root_temp_1</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="install_package">
+    <description>Install system packages using apt-get with root privileges.</description>
+    <details>Automatically runs apt-get update before installation (can be disabled). Supports installing multiple packages at once.</details>
+    <parameters>
+      <parameter name="packages" type="string" required="true">
+        <description>Space-separated list of packages to install</description>
+      </parameter>
+      <parameter name="update_first" type="boolean" required="false">
+        <description>Whether to run apt-get update first (default: true)</description>
+      </parameter>
+      <parameter name="terminal_id" type="string" required="false">
+        <description>Terminal to use for installation</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, packages, message, details</description>
+    </returns>
+    <examples>
+  # Install single package
+  <function=install_package>
+  <parameter=packages>nginx</parameter>
+  </function>
+
+  # Install multiple packages
+  <function=install_package>
+  <parameter=packages>postgresql redis-server nginx</parameter>
+  </function>
+
+  # Skip apt-get update
+  <function=install_package>
+  <parameter=packages>curl wget</parameter>
+  <parameter=update_first>false</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="install_pip_package">
+    <description>Install Python packages using pip with root privileges.</description>
+    <parameters>
+      <parameter name="packages" type="string" required="true">
+        <description>Space-separated list of packages to install</description>
+      </parameter>
+      <parameter name="python_version" type="string" required="false">
+        <description>Python interpreter to use (default: python3)</description>
+      </parameter>
+      <parameter name="terminal_id" type="string" required="false">
+        <description>Terminal to use for installation</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, packages, python_version, message, output, exit_code</description>
+    </returns>
+    <examples>
+  <function=install_pip_package>
+  <parameter=packages>requests flask sqlalchemy</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="install_npm_package">
+    <description>Install Node.js packages using npm with root privileges.</description>
+    <parameters>
+      <parameter name="packages" type="string" required="true">
+        <description>Space-separated list of packages to install</description>
+      </parameter>
+      <parameter name="global_install" type="boolean" required="false">
+        <description>Whether to install globally (default: true)</description>
+      </parameter>
+      <parameter name="terminal_id" type="string" required="false">
+        <description>Terminal to use for installation</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, packages, global_install, message, output, exit_code</description>
+    </returns>
+    <examples>
+  <function=install_npm_package>
+  <parameter=packages>express mongoose</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="run_script">
+    <description>Run a script with root privileges. Auto-detects interpreter from file extension.</description>
+    <parameters>
+      <parameter name="script_path" type="string" required="true">
+        <description>Path to the script to execute</description>
+      </parameter>
+      <parameter name="script_args" type="string" required="false">
+        <description>Arguments to pass to the script</description>
+      </parameter>
+      <parameter name="interpreter" type="string" required="false">
+        <description>Interpreter to use (auto-detected if not specified)</description>
+      </parameter>
+      <parameter name="terminal_id" type="string" required="false">
+        <description>Terminal to use for execution</description>
+      </parameter>
+      <parameter name="timeout" type="float" required="false">
+        <description>Execution timeout in seconds (default: 120)</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, script_path, interpreter, arguments, output, exit_code, status</description>
+    </returns>
+    <examples>
+  <function=run_script>
+  <parameter=script_path>/workspace/setup.sh</parameter>
+  </function>
+
+  <function=run_script>
+  <parameter=script_path>/workspace/analyze.py</parameter>
+  <parameter=script_args>--target example.com --verbose</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="create_database">
+    <description>Create a database with root privileges. Supports MySQL, PostgreSQL, SQLite, and MongoDB.</description>
+    <details>Automatically starts the database service if not running. For MySQL/PostgreSQL, can also create a user with access to the database.</details>
+    <parameters>
+      <parameter name="db_type" type="string" required="true">
+        <description>Database type: mysql, postgresql, sqlite, mongodb</description>
+      </parameter>
+      <parameter name="db_name" type="string" required="true">
+        <description>Name of the database to create</description>
+      </parameter>
+      <parameter name="db_user" type="string" required="false">
+        <description>Optional username for database access</description>
+      </parameter>
+      <parameter name="db_password" type="string" required="false">
+        <description>Optional password for database user</description>
+      </parameter>
+      <parameter name="terminal_id" type="string" required="false">
+        <description>Terminal to use for database creation</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, db_type, db_name, db_user, connection_string, details</description>
+    </returns>
+    <examples>
+  # Create SQLite database
+  <function=create_database>
+  <parameter=db_type>sqlite</parameter>
+  <parameter=db_name>myapp</parameter>
+  </function>
+
+  # Create PostgreSQL database with user
+  <function=create_database>
+  <parameter=db_type>postgresql</parameter>
+  <parameter=db_name>webapp</parameter>
+  <parameter=db_user>appuser</parameter>
+  <parameter=db_password>securepass123</parameter>
+  </function>
+    </examples>
+  </tool>
+
+  <tool name="manage_service">
+    <description>Manage system services with root privileges.</description>
+    <parameters>
+      <parameter name="service_name" type="string" required="true">
+        <description>Name of the service to manage</description>
+      </parameter>
+      <parameter name="action" type="string" required="true">
+        <description>Action to perform: start, stop, restart, status, enable, disable</description>
+      </parameter>
+      <parameter name="terminal_id" type="string" required="false">
+        <description>Terminal to use for service management</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, service_name, action, output, exit_code</description>
+    </returns>
+    <examples>
+  <function=manage_service>
+  <parameter=service_name>nginx</parameter>
+  <parameter=action>start</parameter>
+  </function>
+
+  <function=manage_service>
+  <parameter=service_name>postgresql</parameter>
+  <parameter=action>restart</parameter>
+  </function>
+    </examples>
+  </tool>
+</tools>

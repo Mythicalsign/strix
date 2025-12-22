@@ -40,6 +40,12 @@ if not SANDBOX_MODE:
     from .terminal import *  # noqa: F403
     from .thinking import *  # noqa: F403
     from .todo import *  # noqa: F403
+    
+    # New enhanced modules
+    from .root_terminal import *  # noqa: F403
+    from .custom_agents import *  # noqa: F403
+    from .knowledge import *  # noqa: F403
+    from .orchestration import *  # noqa: F403
 
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
@@ -50,6 +56,7 @@ else:
     from .proxy import *  # noqa: F403
     from .python import *  # noqa: F403
     from .terminal import *  # noqa: F403
+    from .root_terminal import *  # noqa: F403
 
 __all__ = [
     "ImplementedInClientSideOnlyError",
