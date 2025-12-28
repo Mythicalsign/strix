@@ -1,0 +1,332 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tool_definitions>
+    <description>
+        StrixDB Tools - Permanent GitHub-based Knowledge Repository
+        
+        These tools allow you to store and retrieve useful artifacts in StrixDB,
+        a permanent GitHub repository. Act as an enthusiastic collector - save
+        scripts, exploits, knowledge, tools, methods, and anything else useful
+        for future security testing engagements.
+        
+        Categories:
+        - scripts: Automation scripts, shell scripts, utilities
+        - exploits: Working exploits and PoCs
+        - knowledge: Security knowledge, research notes, documentation
+        - libraries: Reusable code libraries and modules
+        - sources: Data sources, references, wordlists
+        - methods: Attack methodologies and techniques
+        - tools: Custom security tools
+        - configs: Configuration files and templates
+        - wordlists: Custom wordlists for fuzzing
+        - payloads: Useful payloads for attacks
+        - templates: Report and code templates
+        - notes: Quick notes and findings
+    </description>
+
+    <tool name="strixdb_save">
+        <description>
+            Save an item to StrixDB for permanent storage.
+            
+            Use this to store:
+            - Useful scripts you created or found
+            - Working exploits and PoCs
+            - Security knowledge and notes
+            - Custom tools and utilities
+            - Attack methodologies
+            - Anything else useful for future engagements
+            
+            Be an enthusiastic collector! If something might be useful later, save it.
+        </description>
+        <parameters>
+            <parameter name="category" type="string" required="true">
+                Category for the item. Valid categories:
+                scripts, exploits, knowledge, libraries, sources, methods,
+                tools, configs, wordlists, payloads, templates, notes
+            </parameter>
+            <parameter name="name" type="string" required="true">
+                Name of the item (will be sanitized for filename)
+            </parameter>
+            <parameter name="content" type="string" required="true">
+                Content to save (script, exploit code, knowledge, etc.)
+            </parameter>
+            <parameter name="description" type="string" required="false">
+                Description of what this item does and when to use it
+            </parameter>
+            <parameter name="tags" type="array" required="false">
+                Tags for categorization and search (e.g., ["sqli", "bypass", "mysql"])
+            </parameter>
+            <parameter name="content_type" type="string" required="false">
+                Type of content: text, script, json, python, javascript, yaml, binary
+                Default: text
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with operation result including success status and item info
+        </returns>
+        <example>
+            Save a useful SQL injection bypass technique:
+            strixdb_save(
+                category="exploits",
+                name="mysql_auth_bypass",
+                content="' OR '1'='1' -- ...",
+                description="MySQL authentication bypass using comment injection",
+                tags=["sqli", "mysql", "auth_bypass"]
+            )
+        </example>
+    </tool>
+
+    <tool name="strixdb_search">
+        <description>
+            Search for items in StrixDB.
+            
+            Search across names, descriptions, and content to find useful
+            artifacts from previous engagements.
+        </description>
+        <parameters>
+            <parameter name="query" type="string" required="true">
+                Search query (searches name, description, content)
+            </parameter>
+            <parameter name="category" type="string" required="false">
+                Optional category filter
+            </parameter>
+            <parameter name="tags" type="array" required="false">
+                Optional tags filter (items must have at least one matching tag)
+            </parameter>
+            <parameter name="limit" type="integer" required="false">
+                Maximum number of results (default: 20)
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with search results including item names, categories, and paths
+        </returns>
+        <example>
+            Search for SQL injection related items:
+            strixdb_search(
+                query="sql injection",
+                category="exploits",
+                tags=["sqli"]
+            )
+        </example>
+    </tool>
+
+    <tool name="strixdb_get">
+        <description>
+            Retrieve a specific item from StrixDB.
+            
+            Use this to get the full content of an item you found via search
+            or know exists from previous use.
+        </description>
+        <parameters>
+            <parameter name="category" type="string" required="true">
+                Category of the item
+            </parameter>
+            <parameter name="name" type="string" required="true">
+                Name of the item to retrieve
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with item content and metadata
+        </returns>
+        <example>
+            Get a stored exploit:
+            strixdb_get(
+                category="exploits",
+                name="mysql_auth_bypass"
+            )
+        </example>
+    </tool>
+
+    <tool name="strixdb_list">
+        <description>
+            List items in StrixDB.
+            
+            Browse available items in a category or across all categories.
+        </description>
+        <parameters>
+            <parameter name="category" type="string" required="false">
+                Category to list (omit for all categories)
+            </parameter>
+            <parameter name="limit" type="integer" required="false">
+                Maximum number of items (default: 50)
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with list of items including names, categories, and paths
+        </returns>
+        <example>
+            List all exploits:
+            strixdb_list(category="exploits")
+            
+            List all items:
+            strixdb_list()
+        </example>
+    </tool>
+
+    <tool name="strixdb_update">
+        <description>
+            Update an existing item in StrixDB.
+            
+            Use this to improve or fix stored items.
+        </description>
+        <parameters>
+            <parameter name="category" type="string" required="true">
+                Category of the item
+            </parameter>
+            <parameter name="name" type="string" required="true">
+                Name of the item
+            </parameter>
+            <parameter name="content" type="string" required="true">
+                New content for the item
+            </parameter>
+            <parameter name="description" type="string" required="false">
+                New description (optional, keeps existing if not provided)
+            </parameter>
+            <parameter name="tags" type="array" required="false">
+                New tags (optional, keeps existing if not provided)
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with operation result
+        </returns>
+    </tool>
+
+    <tool name="strixdb_delete">
+        <description>
+            Delete an item from StrixDB.
+            
+            Use sparingly - only delete items that are truly obsolete or incorrect.
+        </description>
+        <parameters>
+            <parameter name="category" type="string" required="true">
+                Category of the item
+            </parameter>
+            <parameter name="name" type="string" required="true">
+                Name of the item to delete
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with operation result
+        </returns>
+    </tool>
+
+    <tool name="strixdb_get_categories">
+        <description>
+            Get all available categories in StrixDB with descriptions and item counts.
+        </description>
+        <parameters>
+            <!-- No parameters required -->
+        </parameters>
+        <returns>
+            Dictionary with category information including names, descriptions, and item counts
+        </returns>
+    </tool>
+
+    <tool name="strixdb_create_directory">
+        <description>
+            Create a subdirectory within a category for organization.
+        </description>
+        <parameters>
+            <parameter name="category" type="string" required="true">
+                Parent category
+            </parameter>
+            <parameter name="subdirectory" type="string" required="true">
+                Name of subdirectory to create
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with operation result
+        </returns>
+    </tool>
+
+    <tool name="strixdb_get_stats">
+        <description>
+            Get statistics about the StrixDB repository.
+        </description>
+        <parameters>
+            <!-- No parameters required -->
+        </parameters>
+        <returns>
+            Dictionary with stats including total items, items per category, size, etc.
+        </returns>
+    </tool>
+
+    <tool name="strixdb_export">
+        <description>
+            Export items from StrixDB in JSON or Markdown format.
+        </description>
+        <parameters>
+            <parameter name="category" type="string" required="false">
+                Category to export (omit for all)
+            </parameter>
+            <parameter name="format" type="string" required="false">
+                Export format: json or markdown (default: json)
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with exported data
+        </returns>
+    </tool>
+
+    <tool name="strixdb_import_item">
+        <description>
+            Import an item to StrixDB from a dictionary.
+        </description>
+        <parameters>
+            <parameter name="item_data" type="object" required="true">
+                Dictionary with item data: category, name, content, description, tags
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with import result
+        </returns>
+    </tool>
+
+    <tool name="strixdb_tag_item">
+        <description>
+            Add or replace tags for an existing item.
+        </description>
+        <parameters>
+            <parameter name="category" type="string" required="true">
+                Category of the item
+            </parameter>
+            <parameter name="name" type="string" required="true">
+                Name of the item
+            </parameter>
+            <parameter name="tags" type="array" required="true">
+                Tags to add or set
+            </parameter>
+            <parameter name="append" type="boolean" required="false">
+                If true, append to existing tags; if false, replace (default: true)
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with operation result
+        </returns>
+    </tool>
+
+    <tool name="strixdb_get_recent">
+        <description>
+            Get recently added or modified items.
+        </description>
+        <parameters>
+            <parameter name="limit" type="integer" required="false">
+                Maximum number of items (default: 10)
+            </parameter>
+        </parameters>
+        <returns>
+            Dictionary with recent items including timestamps and actions
+        </returns>
+    </tool>
+
+    <tool name="strixdb_sync">
+        <description>
+            Sync with StrixDB and get current status.
+        </description>
+        <parameters>
+            <!-- No parameters required -->
+        </parameters>
+        <returns>
+            Dictionary with sync status and current stats
+        </returns>
+    </tool>
+</tool_definitions>

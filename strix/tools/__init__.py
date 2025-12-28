@@ -52,6 +52,9 @@ if not SANDBOX_MODE:
     
     # Multi-Agent Collaboration Protocol
     from .collaboration import *  # noqa: F403
+    
+    # StrixDB - Permanent GitHub Knowledge Repository
+    from .strixdb import *  # noqa: F403
 
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403
