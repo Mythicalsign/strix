@@ -35,10 +35,10 @@
 <br>
 
 > [!TIP]
-> **New!** Strix now supports **Hosted Mode** with a beautiful web dashboard! Deploy your own Strix server on any cloud VM, Codespaces, or Google Colab and access it through your browser.
+> **New!** Strix now features **StrixDB** - a permanent GitHub-based knowledge repository where the AI agent stores scripts, tools, exploits, methods, and useful artifacts for future use!
 
 > [!TIP]
-> Strix also integrates seamlessly with GitHub Actions and CI/CD pipelines. Automatically scan for vulnerabilities on every pull request and block insecure code before it reaches production!
+> Strix integrates seamlessly with **GitHub Actions** and CI/CD pipelines. Run automated security scans with configurable timeframes and prompts. See [Flows.md](Flows.md) for the workflow configuration!
 
 ---
 
@@ -53,6 +53,8 @@ Strix are autonomous AI agents that act just like real hackers - they run your c
 - ✅ **Real validation** with PoCs, not false positives
 - 💻 **Developer‑first** CLI with actionable reports
 - 🔄 **Auto‑fix & reporting** to accelerate remediation
+- 📚 **StrixDB** - Permanent knowledge repository for agent artifacts
+- ⚙️ **GitHub Actions** - Automated scans with configurable timeframes
 
 
 ## 🎯 Use Cases
@@ -67,6 +69,50 @@ Strix are autonomous AI agents that act just like real hackers - they run your c
 ## 🆕 New Features (Enhanced Edition)
 
 This enhanced version of Strix includes significant new capabilities:
+
+### 🗄️ StrixDB - Permanent Knowledge Repository (NEW!)
+
+The AI agent now has access to **StrixDB**, a permanent GitHub repository where it stores and retrieves useful artifacts:
+
+- **Scripts & Tools**: Custom scripts, automation tools, and utilities
+- **Exploits & PoCs**: Working exploits and proof-of-concept code
+- **Knowledge Base**: General security knowledge, methods, and techniques
+- **Libraries**: Reusable code libraries and modules
+- **Sources**: Useful data sources, wordlists, and references
+- **Methods**: Attack methodologies and testing procedures
+
+The agent acts as an **enthusiastic collector**, automatically storing anything useful it discovers or creates for future reference across all engagements.
+
+```python
+# Available StrixDB tools:
+- strixdb_save(category, name, content, description, tags)  # Save to StrixDB
+- strixdb_search(query, category, tags)                      # Search artifacts
+- strixdb_get(category, name)                                # Retrieve specific item
+- strixdb_list(category)                                     # List items in category
+- strixdb_update(category, name, content)                    # Update existing item
+- strixdb_delete(category, name)                             # Remove item
+```
+
+**Categories supported:**
+- `scripts` - Automation scripts and tools
+- `exploits` - Working exploits and PoCs
+- `knowledge` - Security knowledge and notes
+- `libraries` - Reusable code libraries
+- `sources` - Wordlists, data sources, references
+- `methods` - Attack methodologies
+- `tools` - Custom security tools
+- `configs` - Configuration files and templates
+
+### ⚙️ GitHub Actions Integration (NEW!)
+
+Run Strix through GitHub Actions with full configuration options:
+
+- **Custom Prompts**: Provide detailed instructions for each scan
+- **Timeframe Control**: Set maximum runtime for the AI agent
+- **Target Configuration**: Specify targets via workflow inputs
+- **Automated Reporting**: Results saved as workflow artifacts
+
+See [Flows.md](Flows.md) for the complete workflow configuration!
 
 ### 🔐 Root Terminal Access
 
@@ -191,11 +237,6 @@ Significantly improved coordination capabilities:
 - **Workflow Execution**: Execute workflows with automatic task creation
 - **Pause/Resume**: Control workflow execution
 
-#### Monitoring Dashboard
-- **System Metrics**: Real-time agent and task statistics
-- **Agent Health**: Health status (healthy, busy, overloaded, degraded, critical)
-- **Dashboard View**: Comprehensive orchestration overview
-
 ```python
 # Create a workflow
 create_workflow(
@@ -222,7 +263,7 @@ broadcast_message(
     priority="high"
 )
 
-# Get orchestration dashboard
+# Get orchestration status
 get_orchestration_dashboard()
 ```
 
@@ -272,14 +313,6 @@ strix --target ./app-directory
 - 📊 **Usage Tracking** - Monitor usage across all providers
 - 🌐 **Unified API** - Access Gemini, Claude, GPT, and more through one endpoint
 
-**Dashboard Integration:**
-The Strix web dashboard includes a full CLIProxyAPI management panel where you can:
-- Connect Google/Claude/OpenAI/Qwen accounts via OAuth
-- Add and manage API keys
-- View real-time usage statistics
-- Configure model routing and failover
-- Test model availability
-
 ### Traditional API Key Setup
 
 If you prefer direct API access:
@@ -299,132 +332,25 @@ strix --target ./app-directory
 > [!NOTE]
 > First run automatically pulls the sandbox Docker image. Results are saved to `strix_runs/<run-name>`
 
-## ☁️ Run Strix in Cloud
-
-Want to skip the local setup, API keys, and unpredictable LLM costs? Run the hosted cloud version of Strix at **[app.usestrix.com](https://usestrix.com)**.
-
-Launch a scan in just a few minutes—no setup or configuration required—and you'll get:
-
-- **A full pentest report** with validated findings and clear remediation steps
-- **Shareable dashboards** your team can use to track fixes over time
-- **CI/CD and GitHub integrations** to block risky changes before production
-- **Continuous monitoring** so new vulnerabilities are caught quickly
-
-[**Run your first pentest now →**](https://usestrix.com)
-
 ---
 
-## 🌐 Self-Hosted Mode (NEW!)
+## ⚙️ GitHub Actions Workflow
 
-Deploy Strix with a web-based dashboard on your own infrastructure - perfect for Google Colab, GitHub Codespaces, cloud VMs, or local servers.
+Run Strix automatically via GitHub Actions! See [Flows.md](Flows.md) for the complete workflow configuration.
 
-### Quick Start - Hosted Mode
+**Quick Setup:**
 
-```bash
-# Clone the repository
-git clone https://github.com/usestrix/strix.git
-cd strix
+1. Add secrets to your repository:
+   - `STRIX_LLM` - Model name (e.g., `openai/gpt-5`)
+   - `LLM_API_KEY` - Your API key
+   - `STRIXDB_TOKEN` - GitHub token for StrixDB access
 
-# Install with server dependencies
-pip install -e ".[server]"
+2. Copy the workflow from [Flows.md](Flows.md) to `.github/workflows/strix.yml`
 
-# Build the web dashboard (requires Node.js)
-cd web-dashboard && npm install && npm run build && cd ..
-
-# Configure your AI provider
-export STRIX_LLM="openai/gpt-4"
-export LLM_API_KEY="your-api-key"
-
-# Start the server
-strix-server --port 8000
-```
-
-Access the dashboard at `http://localhost:8000` or your VM's public IP.
-
-### 🎮 Dashboard Features
-
-The Strix Dashboard is designed like a plane's cockpit - giving you complete control over your security testing:
-
-- **Real-time Agent Monitoring** - Watch AI agents work in real-time with live updates
-- **Agent Tree View** - Visualize the hierarchy of agents and their tasks
-- **Vulnerability Panel** - Track discovered vulnerabilities with severity ratings
-- **Interactive Chat** - Send messages to agents and guide their testing
-- **Scan Controls** - Start, stop, and configure scans from the UI
-- **Multi-target Support** - Test multiple targets simultaneously
-- **Live Statistics** - Monitor iterations, duration, and agent progress
-
-### Deploy on Cloud Platforms
-
-#### Google Colab
-
-```python
-# In a Colab notebook
-!pip install strix-agent[server]
-!git clone https://github.com/usestrix/strix.git
-%cd strix/web-dashboard
-!npm install && npm run build
-%cd ..
-
-import os
-os.environ["STRIX_LLM"] = "openai/gpt-4"
-os.environ["LLM_API_KEY"] = "your-key"
-
-# Start server with ngrok for public URL
-!pip install pyngrok
-from pyngrok import ngrok
-public_url = ngrok.connect(8000)
-print(f"Dashboard URL: {public_url}")
-
-!strix-server --port 8000
-```
-
-#### GitHub Codespaces
-
-```bash
-# In terminal
-pip install -e ".[server]"
-cd web-dashboard && npm install && npm run build && cd ..
-export STRIX_LLM="openai/gpt-4"
-export LLM_API_KEY="your-key"
-strix-server --port 8000
-# Access via Codespaces port forwarding
-```
-
-#### Docker Deployment
-
-```bash
-# Coming soon - Docker image with pre-built dashboard
-docker run -p 8000:8000 \
-  -e STRIX_LLM="openai/gpt-4" \
-  -e LLM_API_KEY="your-key" \
-  usestrix/strix-dashboard
-```
-
-### Server CLI Options
-
-```bash
-strix-server --help
-
-Options:
-  --host TEXT        Host to bind (default: 0.0.0.0)
-  --port INTEGER     Port number (default: 8000)
-  --dev              Development mode with auto-reload
-  --workers INTEGER  Number of worker processes
-  --build-dashboard  Build dashboard before starting
-```
-
-### API Endpoints
-
-The server exposes REST and WebSocket APIs:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/scan/start` | POST | Start a new scan |
-| `/api/scan/{id}/stop` | POST | Stop a running scan |
-| `/api/agents` | GET | List all agents |
-| `/api/vulnerabilities` | GET | List vulnerabilities |
-| `/ws` | WebSocket | Real-time updates |
+3. Trigger manually or on events with custom inputs:
+   - **prompt**: Custom instructions for the AI agent
+   - **timeframe**: Maximum runtime in minutes (default: 60)
+   - **target**: Target to scan
 
 ---
 
@@ -437,11 +363,12 @@ Strix agents come equipped with a comprehensive security testing toolkit:
 - **Full HTTP Proxy** - Full request/response manipulation and analysis
 - **Browser Automation** - Multi-tab browser for testing of XSS, CSRF, auth flows
 - **Terminal Environments** - Interactive shells for command execution and testing
-- **Root Terminal Access** - Full sudo/root access for privileged operations (NEW!)
+- **Root Terminal Access** - Full sudo/root access for privileged operations
 - **Python Runtime** - Custom exploit development and validation
 - **Reconnaissance** - Automated OSINT and attack surface mapping
 - **Code Analysis** - Static and dynamic analysis capabilities
-- **Knowledge Management** - Structured findings with linking and search (ENHANCED!)
+- **Knowledge Management** - Structured findings with linking and search
+- **StrixDB Integration** - Permanent artifact storage and retrieval (NEW!)
 
 ### 🎯 Comprehensive Vulnerability Detection
 
@@ -462,10 +389,10 @@ Advanced multi-agent orchestration for comprehensive security testing:
 - **Distributed Workflows** - Specialized agents for different attacks and assets
 - **Scalable Testing** - Parallel execution for fast comprehensive coverage
 - **Dynamic Coordination** - Agents collaborate and share discoveries
-- **Priority-Based Scheduling** - Task prioritization with dependency resolution (NEW!)
-- **Load Balancing** - Automatic workload distribution (NEW!)
-- **Team Management** - Organize agents into functional teams (NEW!)
-- **Workflow Automation** - Define and execute multi-step workflows (NEW!)
+- **Priority-Based Scheduling** - Task prioritization with dependency resolution
+- **Load Balancing** - Automatic workload distribution
+- **Team Management** - Organize agents into functional teams
+- **Workflow Automation** - Define and execute multi-step workflows
 
 ---
 
@@ -510,7 +437,9 @@ strix -n --target https://your-app.com
 
 ### 🔄 CI/CD (GitHub Actions)
 
-Strix can be added to your pipeline to run a security test on pull requests with a lightweight GitHub Actions workflow:
+Strix can be added to your pipeline to run a security test on pull requests. See [Flows.md](Flows.md) for the complete workflow configuration with prompt and timeframe support!
+
+Basic example:
 
 ```yaml
 name: strix-penetration-test
@@ -564,6 +493,15 @@ export LLM_API_BASE="your-api-base-url"  # for local models (Ollama, LMStudio)
 export PERPLEXITY_API_KEY="your-api-key"  # for search capabilities
 ```
 
+#### StrixDB Configuration
+
+```bash
+# StrixDB GitHub repository settings
+export STRIXDB_REPO="username/StrixDB"        # Your StrixDB repository
+export STRIXDB_TOKEN="your-github-token"      # GitHub token with repo access
+export STRIXDB_BRANCH="main"                  # Branch to use (default: main)
+```
+
 #### Supported Models
 
 With **CLIProxyAPI**, you can access models from multiple providers through a single endpoint:
@@ -579,33 +517,6 @@ With **CLIProxyAPI**, you can access models from multiple providers through a si
 
 ---
 
-## 🔌 CLIProxyAPI Dashboard
-
-The Strix web dashboard includes a comprehensive CLIProxyAPI management interface:
-
-### Features
-
-- **📊 Usage Analytics** - Real-time monitoring of requests, tokens, and success rates
-- **👥 Account Management** - Add/remove Google, Claude, OpenAI, Qwen accounts via OAuth
-- **🔑 API Key Management** - Configure and manage API keys for each provider
-- **🎯 Model Configuration** - Test models, set defaults, configure routing
-- **⚙️ Advanced Settings** - Debug logging, request retry, quota behavior
-
-### Accessing the Dashboard
-
-1. Navigate to the CLIProxyAPI panel using the Network icon in the sidebar
-2. Configure your CLIProxyAPI server URL (default: `http://localhost:8317`)
-3. Test the connection and enable as your default provider
-
-### OAuth Login
-
-Connect your existing accounts without API keys:
-1. Click on a provider card (Google, Claude, OpenAI, etc.)
-2. Complete the OAuth flow in the popup window
-3. Your account is now connected and ready to use!
-
-For more details, visit the [CLIProxyAPI Documentation](https://help.router-for.me/).
-
 ## 🤝 Contributing
 
 We welcome contributions of code, docs, and new prompt modules - check out our [Contributing Guide](CONTRIBUTING.md) to get started or open a [pull request](https://github.com/usestrix/strix/pulls)/[issue](https://github.com/usestrix/strix/issues).
@@ -617,6 +528,7 @@ Have questions? Found a bug? Want to contribute? **[Join our Discord!](https://d
 ## 🌟 Support the Project
 
 **Love Strix?** Give us a ⭐ on GitHub!
+
 ## 🙏 Acknowledgements
 
 Strix builds on the incredible work of open-source projects like [LiteLLM](https://github.com/BerriAI/litellm), [Caido](https://github.com/caido/caido), [ProjectDiscovery](https://github.com/projectdiscovery), [Playwright](https://github.com/microsoft/playwright), and [Textual](https://github.com/Textualize/textual). Huge thanks to their maintainers!
@@ -762,6 +674,11 @@ request_help(
 
 ## 📁 All Modules and Files
 
+### StrixDB Module (`strix/tools/strixdb/`) **NEW!**
+- `__init__.py` - Module exports
+- `strixdb_actions.py` - StrixDB GitHub repository operations
+- `strixdb_actions_schema.xml` - XML schema for tools
+
 ### Root Terminal Module (`strix/tools/root_terminal/`)
 - `__init__.py` - Module exports
 - `root_terminal_actions.py` - Tool functions for root operations
@@ -784,27 +701,29 @@ request_help(
 - `orchestration_actions.py` - Multi-agent orchestration system
 - `orchestration_actions_schema.xml` - XML schema for tools
 
-### CVE Database Module (`strix/tools/cve_database/`) **NEW!**
+### CVE Database Module (`strix/tools/cve_database/`)
 - `__init__.py` - Module exports
 - `cve_database_actions.py` - CVE/Exploit database integration
 - `cve_database_actions_schema.xml` - XML schema for tools
 
-### Collaboration Module (`strix/tools/collaboration/`) **NEW!**
+### Collaboration Module (`strix/tools/collaboration/`)
 - `__init__.py` - Module exports
 - `collaboration_actions.py` - Multi-agent collaboration protocol
 - `collaboration_actions_schema.xml` - XML schema for tools
 
-### TUI Renderers (`strix/interface/tool_components/`) **NEW!**
+### TUI Renderers (`strix/interface/tool_components/`)
 - `cve_renderer.py` - Rich output for CVE database results
 - `collaboration_renderer.py` - Rich output for collaboration status
+- `strixdb_renderer.py` - Rich output for StrixDB operations (NEW!)
 
-### Prompt Modules (`strix/prompts/`) **NEW!**
+### Prompt Modules (`strix/prompts/`)
 - `vulnerabilities/cve_hunting.jinja` - CVE hunting guidance
 - `coordination/multi_agent_collaboration.jinja` - Collaboration protocol guide
 
-### Test Suite (`tests/`) **NEW!**
+### Test Suite (`tests/`)
 - `test_cve_database.py` - 200+ test assertions for CVE module
 - `test_collaboration.py` - 200+ test assertions for collaboration module
+- `test_strixdb.py` - Tests for StrixDB module (NEW!)
 
 ### Modified Files
 - `strix/tools/__init__.py` - Updated to include all new modules
