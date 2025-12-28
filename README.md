@@ -68,7 +68,7 @@ Strix are autonomous AI agents that act just like real hackers - they run your c
 
 **Prerequisites:**
 - Docker (running)
-- An LLM provider key (e.g. [get OpenAI API key](https://platform.openai.com/api-keys) or use a local LLM)
+- An LLM provider (CLIProxyAPI recommended, or API key from OpenAI/Anthropic/Google)
 
 ### Installation & First Scan
 
@@ -79,11 +79,56 @@ curl -sSL https://strix.ai/install | bash
 # Or via pipx
 pipx install strix-agent
 
+# Run your first security assessment
+strix --target ./app-directory
+```
+
+### 🔌 CLIProxyAPI Integration (Recommended)
+
+Strix now features **built-in CLIProxyAPI support** - a unified API gateway that lets you use your existing Google, Claude, and OpenAI subscriptions without needing separate API keys!
+
+```bash
+# Install CLIProxyAPI (one-time setup)
+# Download from https://github.com/router-for-me/CLIProxyAPI/releases
+
+# Start CLIProxyAPI
+cliproxy run --port 8317
+
+# Login with your accounts (opens browser for OAuth)
+# Navigate to http://localhost:8317 or use the CLI
+
+# Run Strix - it auto-detects CLIProxyAPI!
+strix --target ./app-directory
+```
+
+**CLIProxyAPI Benefits:**
+- 🔑 **No API Keys Needed** - Use your existing subscriptions via OAuth
+- ⚖️ **Automatic Load Balancing** - Distributes requests across accounts
+- 🔄 **Failover Support** - Auto-switches when quotas are exceeded
+- 📊 **Usage Tracking** - Monitor usage across all providers
+- 🌐 **Unified API** - Access Gemini, Claude, GPT, and more through one endpoint
+
+**Dashboard Integration:**
+The Strix web dashboard includes a full CLIProxyAPI management panel where you can:
+- Connect Google/Claude/OpenAI/Qwen accounts via OAuth
+- Add and manage API keys
+- View real-time usage statistics
+- Configure model routing and failover
+- Test model availability
+
+### Traditional API Key Setup
+
+If you prefer direct API access:
+
+```bash
 # Configure your AI provider
 export STRIX_LLM="openai/gpt-5"
 export LLM_API_KEY="your-api-key"
 
-# Run your first security assessment
+# Disable CLIProxyAPI mode
+export CLIPROXY_ENABLED="false"
+
+# Run Strix
 strix --target ./app-directory
 ```
 
@@ -323,16 +368,74 @@ jobs:
 
 ### ⚙️ Configuration
 
+#### CLIProxyAPI (Recommended)
+
 ```bash
+# CLIProxyAPI is enabled by default
+export CLIPROXY_ENABLED="true"
+export CLIPROXY_BASE_URL="http://localhost:8317/v1"  # CLIProxyAPI server URL
+export CLIPROXY_MANAGEMENT_KEY="your-management-key"  # Optional: for management API access
+
+# Model to use (available from connected accounts)
+export STRIX_LLM="gemini-2.5-pro"  # or claude-sonnet-4, gpt-5, etc.
+
+# Optional
+export PERPLEXITY_API_KEY="your-api-key"  # for search capabilities
+```
+
+#### Direct API Access
+
+```bash
+export CLIPROXY_ENABLED="false"  # Disable CLIProxyAPI mode
 export STRIX_LLM="openai/gpt-5"
 export LLM_API_KEY="your-api-key"
 
 # Optional
-export LLM_API_BASE="your-api-base-url"  # if using a local model, e.g. Ollama, LMStudio
+export LLM_API_BASE="your-api-base-url"  # for local models (Ollama, LMStudio)
 export PERPLEXITY_API_KEY="your-api-key"  # for search capabilities
 ```
 
-[OpenAI's GPT-5](https://openai.com/api/) (`openai/gpt-5`) and [Anthropic's Claude Sonnet 4.5](https://claude.com/platform/api) (`anthropic/claude-sonnet-4-5`) are the recommended models for best results with Strix. We also support many [other options](https://docs.litellm.ai/docs/providers), including cloud and local models, though their performance and reliability may vary.
+#### Supported Models
+
+With **CLIProxyAPI**, you can access models from multiple providers through a single endpoint:
+
+| Provider | Models |
+|----------|--------|
+| Google | gemini-2.5-pro, gemini-2.5-flash, gemini-pro |
+| Anthropic | claude-sonnet-4, claude-3-5-sonnet, claude-3-opus |
+| OpenAI | gpt-5, gpt-4o, o1, o3, codex |
+| Qwen | qwen-max, qwen-plus |
+
+[OpenAI's GPT-5](https://openai.com/api/) and [Anthropic's Claude Sonnet 4](https://claude.com/platform/api) are recommended for best results. We also support many [other options](https://docs.litellm.ai/docs/providers), including cloud and local models.
+
+---
+
+## 🔌 CLIProxyAPI Dashboard
+
+The Strix web dashboard includes a comprehensive CLIProxyAPI management interface:
+
+### Features
+
+- **📊 Usage Analytics** - Real-time monitoring of requests, tokens, and success rates
+- **👥 Account Management** - Add/remove Google, Claude, OpenAI, Qwen accounts via OAuth
+- **🔑 API Key Management** - Configure and manage API keys for each provider
+- **🎯 Model Configuration** - Test models, set defaults, configure routing
+- **⚙️ Advanced Settings** - Debug logging, request retry, quota behavior
+
+### Accessing the Dashboard
+
+1. Navigate to the CLIProxyAPI panel using the Network icon in the sidebar
+2. Configure your CLIProxyAPI server URL (default: `http://localhost:8317`)
+3. Test the connection and enable as your default provider
+
+### OAuth Login
+
+Connect your existing accounts without API keys:
+1. Click on a provider card (Google, Claude, OpenAI, etc.)
+2. Complete the OAuth flow in the popup window
+3. Your account is now connected and ready to use!
+
+For more details, visit the [CLIProxyAPI Documentation](https://help.router-for.me/).
 
 ## 🤝 Contributing
 

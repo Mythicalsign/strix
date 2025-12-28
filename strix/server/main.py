@@ -73,6 +73,10 @@ class SettingsConfig(BaseModel):
     api_base: Optional[str] = None
     perplexity_api_key: Optional[str] = None
     max_iterations: Optional[int] = None
+    # CLIProxyAPI settings
+    cliproxy_enabled: Optional[bool] = None
+    cliproxy_base_url: Optional[str] = None
+    cliproxy_management_key: Optional[str] = None
 
 
 class UserMessage(BaseModel):
@@ -373,8 +377,27 @@ async def list_messages(agent_id: Optional[str] = None) -> list[dict[str, Any]]:
 @app.post("/api/settings")
 async def update_settings(settings: SettingsConfig) -> dict[str, Any]:
     """Update server settings (environment variables)"""
+    # CLIProxyAPI settings (takes precedence)
+    if settings.cliproxy_enabled is not None:
+        os.environ["CLIPROXY_ENABLED"] = str(settings.cliproxy_enabled).lower()
+    if settings.cliproxy_base_url:
+        os.environ["CLIPROXY_BASE_URL"] = settings.cliproxy_base_url
+    if settings.cliproxy_management_key:
+        os.environ["CLIPROXY_MANAGEMENT_KEY"] = settings.cliproxy_management_key
+    
+    # Standard LLM settings
     if settings.llm_provider and settings.llm_model:
-        os.environ["STRIX_LLM"] = f"{settings.llm_provider}/{settings.llm_model}"
+        # For cliproxy, don't prefix with provider
+        if settings.llm_provider == "cliproxy":
+            os.environ["STRIX_LLM"] = settings.llm_model
+            os.environ["CLIPROXY_ENABLED"] = "true"
+            # Auto-set API base to CLIProxyAPI
+            if not settings.api_base:
+                cliproxy_url = settings.cliproxy_base_url or os.getenv("CLIPROXY_BASE_URL", "http://localhost:8317/v1")
+                os.environ["LLM_API_BASE"] = cliproxy_url
+        else:
+            os.environ["STRIX_LLM"] = f"{settings.llm_provider}/{settings.llm_model}"
+    
     if settings.api_key:
         os.environ["LLM_API_KEY"] = settings.api_key
     if settings.api_base:
@@ -383,6 +406,57 @@ async def update_settings(settings: SettingsConfig) -> dict[str, Any]:
         os.environ["PERPLEXITY_API_KEY"] = settings.perplexity_api_key
 
     return {"success": True, "message": "Settings updated"}
+
+
+@app.get("/api/settings")
+async def get_settings() -> dict[str, Any]:
+    """Get current server settings"""
+    return {
+        "llm_model": os.getenv("STRIX_LLM", "gemini-2.5-pro"),
+        "api_base": os.getenv("LLM_API_BASE", ""),
+        "has_api_key": bool(os.getenv("LLM_API_KEY")),
+        "has_perplexity_key": bool(os.getenv("PERPLEXITY_API_KEY")),
+        "cliproxy_enabled": os.getenv("CLIPROXY_ENABLED", "true").lower() == "true",
+        "cliproxy_base_url": os.getenv("CLIPROXY_BASE_URL", "http://localhost:8317/v1"),
+    }
+
+
+@app.get("/api/cliproxy/status")
+async def cliproxy_status() -> dict[str, Any]:
+    """Check CLIProxyAPI connection status"""
+    import httpx
+    
+    cliproxy_url = os.getenv("CLIPROXY_BASE_URL", "http://localhost:8317")
+    management_key = os.getenv("CLIPROXY_MANAGEMENT_KEY", "")
+    
+    try:
+        headers = {}
+        if management_key:
+            headers["Authorization"] = f"Bearer {management_key}"
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{cliproxy_url}/v0/management/config", headers=headers)
+            
+            if response.status_code == 200:
+                config = response.json()
+                return {
+                    "connected": True,
+                    "base_url": cliproxy_url,
+                    "debug": config.get("debug", False),
+                    "has_gemini": bool(config.get("gemini-api-key", [])),
+                    "has_claude": bool(config.get("claude-api-key", [])),
+                    "has_codex": bool(config.get("codex-api-key", [])),
+                }
+            else:
+                return {
+                    "connected": False,
+                    "error": f"HTTP {response.status_code}",
+                }
+    except Exception as e:
+        return {
+            "connected": False,
+            "error": str(e),
+        }
 
 
 # WebSocket endpoint

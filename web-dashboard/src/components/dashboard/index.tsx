@@ -38,7 +38,9 @@ import {
   Sun,
   Github,
   HelpCircle,
+  Network,
 } from 'lucide-react';
+import { CLIProxyDashboard } from '@/components/cliproxy';
 
 export function StrixDashboard() {
   const {
@@ -50,6 +52,7 @@ export function StrixDashboard() {
     vulnerabilities,
     settings,
     updateSettings,
+    cliProxyConnected,
   } = useStrixStore();
   const { } = useStrixWebSocket();
 
@@ -248,6 +251,23 @@ export function StrixDashboard() {
               <TooltipContent side="right">Terminal Output</TooltipContent>
             </Tooltip>
 
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={activePanel === 'cliproxy' ? 'secondary' : 'ghost'}
+                  size="icon"
+                  onClick={() => setActivePanel('cliproxy')}
+                  className="relative"
+                >
+                  <Network className="h-5 w-5" />
+                  {cliProxyConnected && (
+                    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">CLIProxyAPI</TooltipContent>
+            </Tooltip>
+
             <div className="flex-1" />
 
             <Tooltip>
@@ -268,7 +288,13 @@ export function StrixDashboard() {
         {/* Main Panel Area */}
         <main className="flex-1 flex flex-col overflow-hidden">
           {activePanel === 'settings' ? (
-            <SettingsPanel />
+            <div className="overflow-auto">
+              <SettingsPanel />
+            </div>
+          ) : activePanel === 'cliproxy' ? (
+            <div className="overflow-auto">
+              <CLIProxyDashboard />
+            </div>
           ) : (
             <>
               {/* Scan Control */}

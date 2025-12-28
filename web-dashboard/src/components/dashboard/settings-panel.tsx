@@ -21,6 +21,11 @@ import {
 } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert';
+import {
   Settings,
   Key,
   Server,
@@ -31,17 +36,27 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
+  Network,
+  Zap,
+  ExternalLink,
 } from 'lucide-react';
 
 const LLM_PROVIDERS = [
-  { value: 'openai', label: 'OpenAI', models: ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-3.5-turbo'] },
-  { value: 'anthropic', label: 'Anthropic', models: ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'] },
-  { value: 'google', label: 'Google', models: ['gemini-pro', 'gemini-ultra'] },
+  { 
+    value: 'cliproxy', 
+    label: 'CLIProxyAPI (Recommended)', 
+    models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'claude-sonnet-4', 'claude-3-5-sonnet', 'gpt-4o', 'gpt-5', 'o3', 'o1'],
+    description: 'Unified API gateway - Use your Google/Claude/OpenAI accounts',
+    recommended: true,
+  },
+  { value: 'openai', label: 'OpenAI (Direct)', models: ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-3.5-turbo', 'gpt-5', 'o1', 'o3'] },
+  { value: 'anthropic', label: 'Anthropic (Direct)', models: ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku', 'claude-sonnet-4'] },
+  { value: 'google', label: 'Google (Direct)', models: ['gemini-pro', 'gemini-ultra', 'gemini-2.5-pro', 'gemini-2.5-flash'] },
   { value: 'local', label: 'Local/Custom', models: ['custom'] },
 ];
 
 export function SettingsPanel() {
-  const { settings, updateSettings, serverUrl, setServerUrl, connected } = useStrixStore();
+  const { settings, updateSettings, serverUrl, setServerUrl, connected, cliProxyConnected, cliProxyConfig, setActivePanel } = useStrixStore();
   const [showApiKey, setShowApiKey] = useState(false);
   const [showPerplexityKey, setShowPerplexityKey] = useState(false);
   const [localServerUrl, setLocalServerUrl] = useState(serverUrl);
@@ -49,6 +64,7 @@ export function SettingsPanel() {
 
   const currentProvider = LLM_PROVIDERS.find((p) => p.value === settings.llmProvider);
   const availableModels = currentProvider?.models || [];
+  const isCLIProxy = settings.llmProvider === 'cliproxy';
 
   const handleSave = () => {
     // Save server URL if changed
@@ -108,6 +124,60 @@ export function SettingsPanel() {
         </CardContent>
       </Card>
 
+      {/* CLIProxyAPI Quick Setup */}
+      <Card className="border-purple-500/50 bg-gradient-to-br from-purple-500/5 to-blue-500/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Network className="h-5 w-5 text-purple-500" />
+            CLIProxyAPI - Recommended
+            {cliProxyConnected && (
+              <span className="h-2 w-2 rounded-full bg-green-500" />
+            )}
+          </CardTitle>
+          <CardDescription>
+            Use your Google/Claude/OpenAI subscriptions with automatic load balancing
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Alert>
+            <Zap className="h-4 w-4" />
+            <AlertTitle>No API Keys Needed!</AlertTitle>
+            <AlertDescription>
+              CLIProxyAPI lets you use your existing Google, Claude, and OpenAI accounts via OAuth.
+              All models from connected accounts are available with automatic failover.
+            </AlertDescription>
+          </Alert>
+
+          <div className="flex items-center justify-between p-4 border rounded-lg">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center">
+                <Network className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="font-medium">CLIProxyAPI Status</p>
+                <p className="text-sm text-muted-foreground">
+                  {cliProxyConnected ? 'Connected' : 'Not Connected'}
+                  {cliProxyConnected && ` - ${cliProxyConfig.baseUrl}`}
+                </p>
+              </div>
+            </div>
+            <Button
+              variant={isCLIProxy ? 'secondary' : 'default'}
+              onClick={() => setActivePanel('cliproxy')}
+            >
+              <ExternalLink className="mr-2 h-4 w-4" />
+              {isCLIProxy ? 'Manage' : 'Setup'}
+            </Button>
+          </div>
+
+          {!cliProxyConnected && (
+            <p className="text-xs text-muted-foreground">
+              Click "Setup" to configure CLIProxyAPI as your AI provider.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* LLM Configuration */}
       <Card>
         <CardHeader>
@@ -125,7 +195,13 @@ export function SettingsPanel() {
               <label className="text-sm font-medium">Provider</label>
               <Select
                 value={settings.llmProvider}
-                onValueChange={(v) => updateSettings({ llmProvider: v })}
+                onValueChange={(v) => {
+                  updateSettings({ llmProvider: v });
+                  // Auto-set API base for CLIProxy
+                  if (v === 'cliproxy') {
+                    updateSettings({ apiBase: `${cliProxyConfig.baseUrl}/v1` });
+                  }
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -133,7 +209,10 @@ export function SettingsPanel() {
                 <SelectContent>
                   {LLM_PROVIDERS.map((provider) => (
                     <SelectItem key={provider.value} value={provider.value}>
-                      {provider.label}
+                      <div className="flex items-center gap-2">
+                        {provider.value === 'cliproxy' && <Network className="h-4 w-4 text-purple-500" />}
+                        {provider.label}
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -160,39 +239,51 @@ export function SettingsPanel() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">API Key</label>
-            <div className="relative">
-              <Input
-                type={showApiKey ? 'text' : 'password'}
-                value={settings.apiKey}
-                onChange={(e) => updateSettings({ apiKey: e.target.value })}
-                placeholder="sk-..."
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                {showApiKey ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
+          {isCLIProxy ? (
+            <Alert className="bg-purple-500/10 border-purple-500/20">
+              <Network className="h-4 w-4" />
+              <AlertTitle>CLIProxyAPI Active</AlertTitle>
+              <AlertDescription>
+                API Key is not required when using CLIProxyAPI. Your connected accounts will be used automatically.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">API Key</label>
+              <div className="relative">
+                <Input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={settings.apiKey}
+                  onChange={(e) => updateSettings({ apiKey: e.target.value })}
+                  placeholder="sk-..."
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showApiKey ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">Custom API Base (Optional)</label>
+            <label className="text-sm font-medium">API Base URL</label>
             <Input
               value={settings.apiBase}
               onChange={(e) => updateSettings({ apiBase: e.target.value })}
-              placeholder="https://api.openai.com/v1"
+              placeholder={isCLIProxy ? 'http://localhost:8317/v1' : 'https://api.openai.com/v1'}
             />
             <p className="text-xs text-muted-foreground">
-              For local models (Ollama, LMStudio) or custom endpoints
+              {isCLIProxy 
+                ? 'CLIProxyAPI endpoint (auto-configured)'
+                : 'For local models (Ollama, LMStudio) or custom endpoints'}
             </p>
           </div>
 
