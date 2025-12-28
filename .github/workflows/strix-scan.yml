@@ -1,0 +1,253 @@
+name: Strix Security Scan
+
+on:
+  # Manual trigger with inputs
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target to scan (URL, path, or repository)'
+        required: true
+        default: './'
+        type: string
+      prompt:
+        description: 'Custom instructions for the AI agent'
+        required: false
+        default: ''
+        type: string
+      timeframe:
+        description: 'Maximum runtime in minutes (10 - 720)'
+        required: false
+        default: '60'
+        type: choice
+        options:
+          - '10'
+          - '15'
+          - '30'
+          - '60'
+          - '90'
+          - '120'
+          - '180'
+          - '240'
+          - '360'
+          - '480'
+          - '720'
+      warning_minutes:
+        description: 'Minutes before end to warn AI (1 - 30)'
+        required: false
+        default: '5'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '5'
+          - '10'
+          - '15'
+          - '20'
+          - '30'
+      scan_mode:
+        description: 'Scan mode'
+        required: false
+        default: 'deep'
+        type: choice
+        options:
+          - quick
+          - standard
+          - deep
+      enable_strixdb:
+        description: 'Enable StrixDB artifact storage'
+        required: false
+        default: true
+        type: boolean
+  
+  # Trigger on pull requests
+  pull_request:
+    branches: [main, master, develop]
+  
+  # Trigger on pushes to main
+  push:
+    branches: [main, master]
+
+# Cancel in-progress runs for the same PR/branch
+concurrency:
+  group: strix-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Default configuration
+  DEFAULT_TIMEFRAME: '60'
+  DEFAULT_WARNING_MINUTES: '5'
+  DEFAULT_SCAN_MODE: 'standard'
+
+jobs:
+  strix-scan:
+    name: Strix Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(github.event.inputs.timeframe || '120') }}
+    
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install Strix
+        run: |
+          pip install strix-agent
+          echo "Strix version: $(strix --version)"
+      
+      - name: Create config.json
+        run: |
+          TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
+          WARNING="${{ github.event.inputs.warning_minutes || env.DEFAULT_WARNING_MINUTES }}"
+          SCAN_MODE="${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}"
+          
+          cat > config.json << EOF
+          {
+            "api": {
+              "endpoint": "${{ secrets.CLIPROXY_ENDPOINT }}",
+              "model": "${{ secrets.STRIX_MODEL || 'gemini-2.5-pro' }}",
+              "api_key": "${{ secrets.LLM_API_KEY || '' }}"
+            },
+            "timeframe": {
+              "duration_minutes": ${TIMEFRAME},
+              "warning_minutes": ${WARNING},
+              "time_awareness_enabled": true
+            },
+            "dashboard": {
+              "enabled": true,
+              "show_time_remaining": true,
+              "show_agent_details": true,
+              "show_resource_usage": true
+            },
+            "scan_mode": "${SCAN_MODE}",
+            "strixdb": {
+              "enabled": ${{ github.event.inputs.enable_strixdb || 'false' }},
+              "repo": "${{ secrets.STRIXDB_REPO || '' }}",
+              "token": "${{ secrets.STRIXDB_TOKEN || '' }}"
+            },
+            "perplexity_api_key": "${{ secrets.PERPLEXITY_API_KEY || '' }}"
+          }
+          EOF
+          
+          echo "Created config.json with ${TIMEFRAME}m duration, ${WARNING}m warning"
+      
+      - name: Prepare Custom Instructions
+        id: instructions
+        run: |
+          TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
+          WARNING="${{ github.event.inputs.warning_minutes || env.DEFAULT_WARNING_MINUTES }}"
+          
+          # Build instruction string
+          INSTRUCTIONS=""
+          
+          # Add custom prompt if provided
+          if [ -n "${{ github.event.inputs.prompt }}" ]; then
+            INSTRUCTIONS="${{ github.event.inputs.prompt }}"
+          fi
+          
+          # Add StrixDB instructions if enabled
+          if [ "${{ github.event.inputs.enable_strixdb }}" == "true" ]; then
+            INSTRUCTIONS="${INSTRUCTIONS} Save any useful scripts, tools, exploits, methods, or knowledge to StrixDB for future use."
+          fi
+          
+          # Add PR context if this is a pull request
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            INSTRUCTIONS="${INSTRUCTIONS} This is a pull request review. Focus on security implications of the changed files."
+          fi
+          
+          echo "instructions=${INSTRUCTIONS}" >> $GITHUB_OUTPUT
+      
+      - name: Run Strix Security Scan
+        id: strix
+        run: |
+          set +e  # Don't exit on error
+          
+          TARGET="${{ github.event.inputs.target || './' }}"
+          TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
+          
+          # Run Strix with timeout enforcement
+          timeout ${TIMEFRAME}m strix \
+            --target "${TARGET}" \
+            --scan-mode "${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}" \
+            --non-interactive \
+            --instruction "${{ steps.instructions.outputs.instructions }}" \
+            2>&1 | tee strix_output.log
+          
+          EXIT_CODE=$?
+          
+          # Handle exit codes
+          if [ $EXIT_CODE -eq 124 ]; then
+            echo "Strix scan timed out after ${TIMEFRAME} minutes"
+            echo "timed_out=true" >> $GITHUB_OUTPUT
+          elif [ $EXIT_CODE -eq 2 ]; then
+            echo "Vulnerabilities found!"
+            echo "vulnerabilities_found=true" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+      
+      - name: Upload Scan Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: strix-results-${{ github.run_id }}
+          path: |
+            strix_runs/
+            strix_output.log
+            config.json
+          retention-days: 30
+      
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            let summary = '## 🦉 Strix Security Scan Results\n\n';
+            
+            const timedOut = '${{ steps.strix.outputs.timed_out }}' === 'true';
+            const vulnsFound = '${{ steps.strix.outputs.vulnerabilities_found }}' === 'true';
+            const exitCode = '${{ steps.strix.outputs.exit_code }}';
+            const timeframe = '${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}';
+            
+            if (timedOut) {
+              summary += '⏱️ **Status:** Scan completed (time limit reached)\n\n';
+              summary += `The scan ran for the full ${timeframe} minutes. Results may be partial.\n\n`;
+            } else if (vulnsFound) {
+              summary += '🔴 **Status:** Vulnerabilities Found\n\n';
+              summary += 'Security issues were identified. Please review the detailed report in the workflow artifacts.\n\n';
+            } else {
+              summary += '🟢 **Status:** Scan Completed\n\n';
+              summary += 'No critical vulnerabilities were found.\n\n';
+            }
+            
+            summary += `**Scan Mode:** ${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}\n`;
+            summary += `**Timeframe:** ${timeframe} minutes\n`;
+            summary += `**Exit Code:** ${exitCode}\n\n`;
+            
+            summary += '📎 [View Full Results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+      
+      - name: Fail if Vulnerabilities Found
+        if: steps.strix.outputs.vulnerabilities_found == 'true'
+        run: |
+          echo "Security vulnerabilities were found. Failing the workflow."
+          exit 1
