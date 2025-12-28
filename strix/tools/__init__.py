@@ -46,6 +46,12 @@ if not SANDBOX_MODE:
     from .custom_agents import *  # noqa: F403
     from .knowledge import *  # noqa: F403
     from .orchestration import *  # noqa: F403
+    
+    # CVE/Exploit Database Integration
+    from .cve_database import *  # noqa: F403
+    
+    # Multi-Agent Collaboration Protocol
+    from .collaboration import *  # noqa: F403
 
     if HAS_PERPLEXITY_API:
         from .web_search import *  # noqa: F403

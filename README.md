@@ -409,7 +409,138 @@ Strix builds on the incredible work of open-source projects like [LiteLLM](https
 
 ---
 
-## 📁 New Files and Modules
+## 🆕 NEW: CVE/Exploit Database Integration
+
+### 🔍 Purpose
+Help AI agents find and use known vulnerabilities for identified technologies. When the AI finds a technology like "nginx/1.18.0", it can now automatically query vulnerability databases for known CVEs and find working exploits.
+
+### 📊 Data Sources
+- **NVD (National Vulnerability Database)** - Official CVE database with CVSS scores
+- **Exploit-DB** - Exploit and PoC repository
+- **GitHub Security Advisories** - Package vulnerability database
+- **PacketStorm** - Additional exploit/tool source
+
+### 🛠️ New Tools
+
+| Tool | Description |
+|------|-------------|
+| `query_cve_database` | Query NVD for CVEs by technology/version |
+| `search_exploitdb` | Search Exploit-DB for PoCs |
+| `get_cve_details` | Get detailed CVE information with exploitability |
+| `search_github_advisories` | Search GitHub Security Advisories |
+| `get_technology_vulnerabilities` | **Aggregate vuln data from ALL sources** |
+| `search_packetstorm` | Search PacketStorm for exploits |
+
+### 💡 Usage Example
+```python
+# When AI finds "nginx/1.18.0" in Server header
+result = get_technology_vulnerabilities("nginx", version="1.18.0")
+
+# Output includes:
+# - CVE list with severity scores
+# - Public exploit availability
+# - Actionable recommendations
+# - Links to PoCs and patches
+```
+
+### 🎯 Why It Helps Bug Bounty
+- Automatically test for known CVEs based on detected versions
+- Use pre-built PoCs instead of crafting from scratch
+- Prioritize targets running vulnerable software
+- Save hours of manual CVE research
+
+---
+
+## 🆕 NEW: Multi-Agent Collaboration Protocol
+
+### 🎯 Purpose
+Enable multiple AI agents to work together efficiently without duplicating effort or missing findings.
+
+### ❌ Problem Solved
+Without coordination:
+- Agent A tests `/login` for SQLi
+- Agent B also tests `/login` for SQLi (wasted effort!)
+- Agent C finds SSRF but Agent D doesn't know (missed chaining!)
+
+### ✅ Solution - Collaboration Protocol
+
+#### 1. Claim System
+```python
+# Agent A claims target
+claim_target(agent_state, "/login", "sqli")
+
+# Agent B sees claim and tests different vuln instead
+claim_target(agent_state, "/login", "xss")
+```
+
+#### 2. Finding Sharing (for chaining)
+```python
+# Agent C finds SSRF
+share_finding(
+    agent_state,
+    title="SSRF at /api/fetch",
+    vulnerability_type="ssrf",
+    target="/api/fetch?url=",
+    chainable=True,
+    chain_suggestions=["idor", "auth_bypass"]
+)
+
+# All agents see: "SSRF found, test for chaining!"
+```
+
+#### 3. Work Queue
+```python
+# Add discovered endpoints to queue
+add_to_work_queue(
+    agent_state,
+    target="/api/v2/users/{id}",
+    description="New API endpoint from JS bundle",
+    test_types=["idor", "auth_bypass"],
+    priority="high"
+)
+
+# Agents pick from queue
+work_item = get_next_work_item(agent_state)
+```
+
+#### 4. Help Requests
+```python
+# Agent A needs help
+request_help(
+    agent_state,
+    help_type="decode",
+    description="Found base64 encoded parameter",
+    data="eyJ1c2VyIjoiYWRtaW4ifQ=="
+)
+
+# Specialized agent responds
+```
+
+### 🛠️ New Tools
+
+| Tool | Description |
+|------|-------------|
+| `claim_target` | Claim endpoint/parameter for testing |
+| `release_claim` | Release a claim when done |
+| `list_claims` | See what's being tested |
+| `share_finding` | Share vulnerabilities for chaining |
+| `list_findings` | Get all shared findings |
+| `get_finding_details` | Get full PoC details |
+| `add_to_work_queue` | Add targets to test queue |
+| `get_next_work_item` | Pick up next item to test |
+| `request_help` | Ask for specialized help |
+| `get_collaboration_status` | Overview of all activities |
+| `broadcast_message` | Send messages to all agents |
+
+### 🎯 Why It Helps Bug Bounty
+- **More efficient testing** - No duplicate work
+- **Better vulnerability chaining** - Shared findings enable creative chains
+- **No missed opportunities** - Full coverage with work queue
+- **Specialized assistance** - Get help when stuck
+
+---
+
+## 📁 All Modules and Files
 
 ### Root Terminal Module (`strix/tools/root_terminal/`)
 - `__init__.py` - Module exports
@@ -433,5 +564,28 @@ Strix builds on the incredible work of open-source projects like [LiteLLM](https
 - `orchestration_actions.py` - Multi-agent orchestration system
 - `orchestration_actions_schema.xml` - XML schema for tools
 
+### CVE Database Module (`strix/tools/cve_database/`) **NEW!**
+- `__init__.py` - Module exports
+- `cve_database_actions.py` - CVE/Exploit database integration
+- `cve_database_actions_schema.xml` - XML schema for tools
+
+### Collaboration Module (`strix/tools/collaboration/`) **NEW!**
+- `__init__.py` - Module exports
+- `collaboration_actions.py` - Multi-agent collaboration protocol
+- `collaboration_actions_schema.xml` - XML schema for tools
+
+### TUI Renderers (`strix/interface/tool_components/`) **NEW!**
+- `cve_renderer.py` - Rich output for CVE database results
+- `collaboration_renderer.py` - Rich output for collaboration status
+
+### Prompt Modules (`strix/prompts/`) **NEW!**
+- `vulnerabilities/cve_hunting.jinja` - CVE hunting guidance
+- `coordination/multi_agent_collaboration.jinja` - Collaboration protocol guide
+
+### Test Suite (`tests/`) **NEW!**
+- `test_cve_database.py` - 200+ test assertions for CVE module
+- `test_collaboration.py` - 200+ test assertions for collaboration module
+
 ### Modified Files
-- `strix/tools/__init__.py` - Updated to include new modules
+- `strix/tools/__init__.py` - Updated to include all new modules
+- `strix/interface/tool_components/__init__.py` - Updated with new renderers

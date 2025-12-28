@@ -1,0 +1,109 @@
+# CVE/Exploit Database Hunting Guide
+
+## Overview
+This module provides guidance for systematically finding and exploiting known vulnerabilities (CVEs) in identified technologies. Use the CVE database tools to automate vulnerability discovery and find pre-built exploits.
+
+## Workflow
+
+### Step 1: Technology Fingerprinting
+When you identify a technology and its version, immediately query for known vulnerabilities:
+
+1. **Web Server Headers**: `Server: nginx/1.18.0` → Query for nginx 1.18.0 CVEs
+2. **Framework Signatures**: WordPress version, Django version, etc.
+3. **JavaScript Libraries**: Check `package.json` or inline scripts
+4. **API Responses**: Version info in responses or error messages
+
+### Step 2: Automated CVE Lookup
+Use `get_technology_vulnerabilities()` as your primary tool:
+- Aggregates data from NVD, Exploit-DB, GitHub Advisories
+- Provides severity summary and exploit availability
+- Includes actionable recommendations
+
+Example workflow:
+```
+1. Find: "nginx/1.18.0" in Server header
+2. Call: get_technology_vulnerabilities("nginx", version="1.18.0")
+3. Review: Critical/High CVEs with public exploits
+4. Prioritize: Vulnerabilities with known PoCs
+5. Test: Use found exploits/PoCs
+```
+
+### Step 3: Exploit Search Strategy
+For each high-priority CVE:
+
+1. **Check Exploit-DB**: `search_exploitdb(cve_id="CVE-XXXX-XXXX")`
+   - Look for verified exploits
+   - Check for Metasploit modules
+   - Download and adapt PoCs
+
+2. **Check GitHub**: Many researchers publish PoCs on GitHub
+   - Search: `github.com/search?q=CVE-XXXX-XXXX`
+   - Look for automated exploit tools
+
+3. **Check PacketStorm**: `search_packetstorm("CVE-XXXX-XXXX")`
+   - Additional exploit sources
+   - Security tools and scripts
+
+### Step 4: CVE Prioritization Matrix
+
+| Severity | Public Exploit | Action |
+|----------|---------------|--------|
+| Critical | Yes | IMMEDIATE - Test now |
+| Critical | No | HIGH - Manual testing |
+| High | Yes | HIGH - Test soon |
+| High | No | MEDIUM - Add to queue |
+| Medium | Yes | MEDIUM - Test if time |
+| Medium/Low | No | LOW - Document only |
+
+## Tool Usage Examples
+
+### Finding CVEs for a Technology
+```python
+# Comprehensive vulnerability check
+result = get_technology_vulnerabilities(
+    technology="wordpress",
+    version="5.8.1",
+    include_exploits=True
+)
+
+# Check specific CVE details
+details = get_cve_details("CVE-2021-44228")
+
+# Search for exploits
+exploits = search_exploitdb(cve_id="CVE-2021-44228")
+```
+
+### Handling Common Scenarios
+
+**WordPress Site Detected:**
+1. Check WordPress core version CVEs
+2. Enumerate and check plugin vulnerabilities
+3. Check theme vulnerabilities
+4. Use `search_github_advisories(keyword="wordpress", ecosystem="composer")`
+
+**Java Application Detected:**
+1. Check for Log4j (CVE-2021-44228)
+2. Check Spring framework CVEs
+3. Check dependency vulnerabilities
+4. Use `search_github_advisories(ecosystem="maven")`
+
+**Node.js Application Detected:**
+1. Check `package.json` dependencies
+2. Query each dependency version
+3. Use `search_github_advisories(ecosystem="npm")`
+
+## Best Practices
+
+1. **Always check version specificity**: Some CVEs only affect certain version ranges
+2. **Verify exploit compatibility**: PoCs may need adaptation
+3. **Document findings**: Use `share_finding()` to share with other agents
+4. **Check for patches**: Note if target appears patched
+5. **Test safely**: Some exploits may cause service disruption
+
+## Chaining Opportunities
+CVE exploitation often enables chaining:
+- Information disclosure → Credential theft → Account takeover
+- SSRF → Internal service access → Further exploitation
+- RCE → System access → Lateral movement
+
+Always report chainable findings for team coordination!

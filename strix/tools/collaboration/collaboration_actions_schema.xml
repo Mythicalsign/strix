@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+
+<tool name="claim_target">
+  <description>
+    Claim an endpoint or parameter for testing to prevent duplicate work.
+    ALWAYS claim before testing to ensure no other agent is already testing the same thing.
+    This prevents wasted effort and ensures complete coverage.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="target" type="string" required="true">
+      The target to claim (URL, endpoint, parameter, e.g., "/login", "/api/users?id=")
+    </parameter>
+    <parameter name="test_type" type="string" required="true">
+      Type of test: sqli, xss, ssrf, idor, auth_bypass, path_traversal, rce, xxe, csrf, etc.
+    </parameter>
+    <parameter name="scope" type="string" required="false">
+      Optional scope description (e.g., "login form", "api endpoint", "search parameter")
+    </parameter>
+    <parameter name="estimated_duration" type="integer" required="false" default="30">
+      Estimated test duration in minutes (default: 30)
+    </parameter>
+    <parameter name="priority" type="string" required="false" default="medium">
+      Test priority: critical, high, medium, low
+    </parameter>
+  </parameters>
+  <example>
+    <description>Claim /login endpoint for SQL injection testing</description>
+    <invocation>claim_target(agent_state, "/login", "sqli", scope="authentication")</invocation>
+  </example>
+</tool>
+
+<tool name="release_claim">
+  <description>
+    Release a claim on a target after completing testing.
+    ALWAYS release claims when done to allow other agents to test with different techniques.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="claim_id" type="string" required="false">
+      The claim ID to release (preferred)
+    </parameter>
+    <parameter name="target" type="string" required="false">
+      Target that was claimed (alternative to claim_id)
+    </parameter>
+    <parameter name="test_type" type="string" required="false">
+      Test type that was claimed (used with target)
+    </parameter>
+    <parameter name="result" type="string" required="false">
+      Brief description of test results
+    </parameter>
+    <parameter name="finding_id" type="string" required="false">
+      If a vulnerability was found, link the finding ID from share_finding()
+    </parameter>
+  </parameters>
+  <example>
+    <description>Release claim with no findings</description>
+    <invocation>release_claim(agent_state, claim_id="claim_abc123", result="No SQL injection found")</invocation>
+  </example>
+</tool>
+
+<tool name="list_claims">
+  <description>
+    List all current claims to see what's being tested and avoid duplicate effort.
+    Use this to find unclaimed targets or identify collaboration opportunities.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="status" type="string" required="false">
+      Filter by status: active, completed, expired
+    </parameter>
+    <parameter name="test_type" type="string" required="false">
+      Filter by test type (sqli, xss, etc.)
+    </parameter>
+    <parameter name="agent_filter" type="string" required="false">
+      Filter by specific agent ID
+    </parameter>
+  </parameters>
+  <example>
+    <description>List all active claims</description>
+    <invocation>list_claims(agent_state, status="active")</invocation>
+  </example>
+</tool>
+
+<tool name="share_finding">
+  <description>
+    Share a vulnerability finding with all agents for potential chaining.
+    When you find a vulnerability, ALWAYS share it so other agents can:
+    1. Avoid testing the same thing
+    2. Try to chain it with their findings
+    3. Build on your discovery
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="title" type="string" required="true">
+      Brief title of the finding (e.g., "SSRF in Image Fetcher")
+    </parameter>
+    <parameter name="vulnerability_type" type="string" required="true">
+      Type: sqli, xss, ssrf, idor, rce, auth_bypass, path_traversal, etc.
+    </parameter>
+    <parameter name="target" type="string" required="true">
+      Affected endpoint/parameter (e.g., "/api/fetch?url=")
+    </parameter>
+    <parameter name="description" type="string" required="true">
+      Detailed description of the vulnerability
+    </parameter>
+    <parameter name="severity" type="string" required="false" default="medium">
+      Severity: critical, high, medium, low, info
+    </parameter>
+    <parameter name="poc" type="string" required="false">
+      Proof of concept (payload, request, curl command, etc.)
+    </parameter>
+    <parameter name="evidence" type="string" required="false">
+      Evidence of exploitation (response snippets, behavior observed)
+    </parameter>
+    <parameter name="chainable" type="boolean" required="false" default="true">
+      Whether this could be chained with other vulnerabilities
+    </parameter>
+    <parameter name="chain_suggestions" type="array" required="false">
+      Suggested vulnerabilities to chain with (e.g., ["idor", "auth_bypass"])
+    </parameter>
+    <parameter name="affected_parameters" type="array" required="false">
+      List of affected parameters
+    </parameter>
+    <parameter name="remediation" type="string" required="false">
+      Suggested fix or mitigation
+    </parameter>
+  </parameters>
+  <example>
+    <description>Share an SSRF vulnerability finding</description>
+    <invocation>share_finding(agent_state, "SSRF in Image Fetcher", "ssrf", "/api/fetch?url=", "Server-side request forgery allows internal network access", severity="high", poc="GET /api/fetch?url=http://169.254.169.254/", chainable=True, chain_suggestions=["idor", "auth_bypass"])</invocation>
+  </example>
+</tool>
+
+<tool name="list_findings">
+  <description>
+    List all shared findings for review and potential chaining opportunities.
+    Use this to see what other agents have found and identify ways to chain vulnerabilities.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="severity" type="string" required="false">
+      Filter by severity (critical, high, medium, low, info)
+    </parameter>
+    <parameter name="vulnerability_type" type="string" required="false">
+      Filter by vulnerability type
+    </parameter>
+    <parameter name="chainable_only" type="boolean" required="false" default="false">
+      Only show findings marked as chainable
+    </parameter>
+    <parameter name="limit" type="integer" required="false" default="50">
+      Maximum results to return
+    </parameter>
+  </parameters>
+  <example>
+    <description>List high-severity chainable findings</description>
+    <invocation>list_findings(agent_state, severity="high", chainable_only=True)</invocation>
+  </example>
+</tool>
+
+<tool name="get_finding_details">
+  <description>
+    Get full details of a specific finding including PoC and evidence.
+    Use this to understand a finding better or use its PoC for chaining attempts.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="finding_id" type="string" required="true">
+      The finding ID to retrieve
+    </parameter>
+  </parameters>
+  <example>
+    <description>Get details of a finding for chaining</description>
+    <invocation>get_finding_details(agent_state, "finding_abc123")</invocation>
+  </example>
+</tool>
+
+<tool name="add_to_work_queue">
+  <description>
+    Add a target to the central work queue for testing.
+    Use this when you discover new endpoints or parameters that need testing
+    but you can't handle them right now.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="target" type="string" required="true">
+      Target URL, endpoint, or parameter to test
+    </parameter>
+    <parameter name="description" type="string" required="true">
+      What needs to be tested and why
+    </parameter>
+    <parameter name="test_types" type="array" required="false">
+      Suggested test types (sqli, xss, idor, etc.)
+    </parameter>
+    <parameter name="priority" type="string" required="false" default="medium">
+      Priority: critical, high, medium, low
+    </parameter>
+    <parameter name="notes" type="string" required="false">
+      Additional notes or context
+    </parameter>
+    <parameter name="source" type="string" required="false">
+      How this target was discovered
+    </parameter>
+  </parameters>
+  <example>
+    <description>Add a newly discovered API endpoint to the queue</description>
+    <invocation>add_to_work_queue(agent_state, "/api/v2/users/{id}", "New API endpoint found in JS bundle", test_types=["idor", "auth_bypass"], priority="high", source="JavaScript analysis")</invocation>
+  </example>
+</tool>
+
+<tool name="get_next_work_item">
+  <description>
+    Get the next work item from the queue to test.
+    Use this when you're ready to start testing something new.
+    The item will be marked as assigned to you.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="preferred_test_types" type="array" required="false">
+      Preferred test types to match (e.g., ["sqli", "xss"])
+    </parameter>
+    <parameter name="min_priority" type="string" required="false">
+      Minimum priority level to accept (critical, high, medium, low)
+    </parameter>
+  </parameters>
+  <example>
+    <description>Get high-priority work item for SQL injection testing</description>
+    <invocation>get_next_work_item(agent_state, preferred_test_types=["sqli"], min_priority="high")</invocation>
+  </example>
+</tool>
+
+<tool name="request_help">
+  <description>
+    Request specialized help from other agents.
+    Use this when you encounter something you can't handle alone,
+    like encoded data, complex exploits, or unfamiliar technologies.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="help_type" type="string" required="true">
+      Type of help needed: decode, analyze, exploit, bypass, escalate, other
+    </parameter>
+    <parameter name="description" type="string" required="true">
+      What you need help with
+    </parameter>
+    <parameter name="context" type="string" required="false">
+      Where/how you encountered this
+    </parameter>
+    <parameter name="data" type="string" required="false">
+      Relevant data (encoded string, payload, response, etc.)
+    </parameter>
+    <parameter name="urgency" type="string" required="false" default="normal">
+      Urgency: critical, high, normal, low
+    </parameter>
+  </parameters>
+  <example>
+    <description>Request help decoding a suspicious parameter</description>
+    <invocation>request_help(agent_state, "decode", "Found base64-encoded parameter that seems to contain user data", data="eyJ1c2VyIjoiYWRtaW4iLCJyb2xlIjoiZ3Vlc3QifQ==", context="Cookie named 'session' on /dashboard")</invocation>
+  </example>
+</tool>
+
+<tool name="get_collaboration_status">
+  <description>
+    Get comprehensive collaboration status dashboard.
+    Use this to get an overview of all collaboration activities,
+    pending items, and coordination opportunities.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+  </parameters>
+  <example>
+    <description>Get current collaboration status</description>
+    <invocation>get_collaboration_status(agent_state)</invocation>
+  </example>
+</tool>
+
+<tool name="broadcast_message">
+  <description>
+    Broadcast a message to all agents.
+    Use this for important announcements, coordination messages,
+    or questions that all agents should see.
+  </description>
+  <parameters>
+    <parameter name="agent_state" type="AgentState" required="true">
+      Current agent's state (auto-injected)
+    </parameter>
+    <parameter name="message" type="string" required="true">
+      The message content
+    </parameter>
+    <parameter name="message_type" type="string" required="false" default="info">
+      Type: info, warning, finding, question, coordination
+    </parameter>
+    <parameter name="priority" type="string" required="false" default="normal">
+      Priority: low, normal, high, urgent
+    </parameter>
+  </parameters>
+  <example>
+    <description>Broadcast a coordination message</description>
+    <invocation>broadcast_message(agent_state, "Focus testing on authentication endpoints - found potential auth bypass vector", message_type="coordination", priority="high")</invocation>
+  </example>
+</tool>
+
+</tools>

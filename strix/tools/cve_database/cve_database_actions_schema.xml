@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tools>
+
+<tool name="query_cve_database">
+  <description>
+    Query NVD (National Vulnerability Database) for CVEs affecting specific technologies or versions.
+    Use this when you find a technology/version (e.g., "nginx/1.18.0") and want to check for known vulnerabilities.
+    Returns CVEs with severity scores, descriptions, affected versions, and references.
+  </description>
+  <parameters>
+    <parameter name="keyword" type="string" required="false">
+      Search keyword in CVE descriptions (e.g., "remote code execution", "SQL injection")
+    </parameter>
+    <parameter name="product" type="string" required="false">
+      Product name to search for (e.g., "nginx", "apache", "wordpress", "log4j")
+    </parameter>
+    <parameter name="vendor" type="string" required="false">
+      Vendor name to filter results (e.g., "apache", "microsoft", "oracle")
+    </parameter>
+    <parameter name="version" type="string" required="false">
+      Specific version to check (e.g., "1.18.0", "2.4.49")
+    </parameter>
+    <parameter name="cve_id" type="string" required="false">
+      Specific CVE ID to look up (e.g., "CVE-2021-44228")
+    </parameter>
+    <parameter name="severity" type="string" required="false">
+      Filter by severity: "critical", "high", "medium", "low"
+    </parameter>
+    <parameter name="published_start" type="string" required="false">
+      Start date for publication filter (YYYY-MM-DD format)
+    </parameter>
+    <parameter name="published_end" type="string" required="false">
+      End date for publication filter (YYYY-MM-DD format)
+    </parameter>
+    <parameter name="limit" type="integer" required="false" default="20">
+      Maximum number of results to return (max 100)
+    </parameter>
+  </parameters>
+  <example>
+    <description>Find CVEs for nginx version 1.18.0</description>
+    <invocation>query_cve_database(product="nginx", version="1.18.0")</invocation>
+  </example>
+  <example>
+    <description>Search for Log4j vulnerabilities</description>
+    <invocation>query_cve_database(keyword="log4j")</invocation>
+  </example>
+</tool>
+
+<tool name="get_cve_details">
+  <description>
+    Get detailed information about a specific CVE including exploitability status,
+    public exploits, and remediation recommendations. Use this after finding a CVE
+    to understand its full impact and find available exploits.
+  </description>
+  <parameters>
+    <parameter name="cve_id" type="string" required="true">
+      The CVE identifier (e.g., "CVE-2021-44228", "CVE-2023-1234")
+    </parameter>
+  </parameters>
+  <example>
+    <description>Get full details for Log4Shell vulnerability</description>
+    <invocation>get_cve_details("CVE-2021-44228")</invocation>
+  </example>
+</tool>
+
+<tool name="search_exploitdb">
+  <description>
+    Search Exploit-DB for working exploits and proof-of-concepts.
+    Use this when you want to find actual exploit code for a vulnerability.
+    Returns exploit metadata, download links, and verification status.
+  </description>
+  <parameters>
+    <parameter name="query" type="string" required="false">
+      Search query (technology name, vulnerability description)
+    </parameter>
+    <parameter name="cve_id" type="string" required="false">
+      CVE identifier to search for exploits
+    </parameter>
+    <parameter name="platform" type="string" required="false">
+      Target platform filter (linux, windows, multiple, hardware, etc.)
+    </parameter>
+    <parameter name="exploit_type" type="string" required="false">
+      Type filter (webapps, remote, local, dos, shellcode, papers)
+    </parameter>
+    <parameter name="verified_only" type="boolean" required="false" default="false">
+      Only return verified/tested exploits
+    </parameter>
+    <parameter name="limit" type="integer" required="false" default="20">
+      Maximum results to return
+    </parameter>
+  </parameters>
+  <example>
+    <description>Find WordPress plugin exploits</description>
+    <invocation>search_exploitdb(query="wordpress plugin")</invocation>
+  </example>
+  <example>
+    <description>Find exploits for a specific CVE</description>
+    <invocation>search_exploitdb(cve_id="CVE-2021-44228")</invocation>
+  </example>
+</tool>
+
+<tool name="search_github_advisories">
+  <description>
+    Search GitHub Security Advisories database for package vulnerabilities.
+    Best for finding vulnerabilities in software dependencies (npm, pip, maven, etc.).
+    Returns affected versions, patched versions, and severity information.
+  </description>
+  <parameters>
+    <parameter name="keyword" type="string" required="false">
+      Search keyword (package name, vulnerability description)
+    </parameter>
+    <parameter name="cve_id" type="string" required="false">
+      Specific CVE ID to lookup
+    </parameter>
+    <parameter name="ecosystem" type="string" required="false">
+      Package ecosystem: npm, pip, maven, rubygems, nuget, composer, go, rust, pub, etc.
+    </parameter>
+    <parameter name="severity" type="string" required="false">
+      Severity filter: critical, high, medium, low
+    </parameter>
+    <parameter name="limit" type="integer" required="false" default="20">
+      Maximum results to return
+    </parameter>
+  </parameters>
+  <example>
+    <description>Find vulnerabilities in log4j Java package</description>
+    <invocation>search_github_advisories(keyword="log4j", ecosystem="maven")</invocation>
+  </example>
+  <example>
+    <description>Check npm packages for critical vulnerabilities</description>
+    <invocation>search_github_advisories(ecosystem="npm", severity="critical")</invocation>
+  </example>
+</tool>
+
+<tool name="search_packetstorm">
+  <description>
+    Search PacketStorm Security for exploits, security tools, and advisories.
+    Provides additional exploit sources beyond Exploit-DB.
+    Returns search links and resource URLs for manual exploration.
+  </description>
+  <parameters>
+    <parameter name="query" type="string" required="true">
+      Search query (technology, CVE, vulnerability type)
+    </parameter>
+    <parameter name="file_type" type="string" required="false">
+      Filter by type: exploits, tools, advisories
+    </parameter>
+    <parameter name="limit" type="integer" required="false" default="20">
+      Maximum results to return
+    </parameter>
+  </parameters>
+  <example>
+    <description>Search for Apache Struts exploits</description>
+    <invocation>search_packetstorm("apache struts")</invocation>
+  </example>
+</tool>
+
+<tool name="get_technology_vulnerabilities">
+  <description>
+    Comprehensive vulnerability search that aggregates data from NVD, Exploit-DB,
+    GitHub Advisories, and PacketStorm. Use this as your primary tool when
+    assessing a technology for vulnerabilities. Provides summary statistics,
+    exploit availability, and actionable recommendations.
+  </description>
+  <parameters>
+    <parameter name="technology" type="string" required="true">
+      Technology/product name (e.g., "nginx", "apache", "wordpress", "spring")
+    </parameter>
+    <parameter name="version" type="string" required="false">
+      Specific version to check (e.g., "1.18.0", "5.8.1")
+    </parameter>
+    <parameter name="vendor" type="string" required="false">
+      Vendor name for more precise results
+    </parameter>
+    <parameter name="include_exploits" type="boolean" required="false" default="true">
+      Also search for public exploits (recommended)
+    </parameter>
+    <parameter name="severity_filter" type="string" required="false">
+      Only return vulnerabilities of this severity or higher
+    </parameter>
+  </parameters>
+  <example>
+    <description>Full vulnerability assessment for nginx 1.18.0</description>
+    <invocation>get_technology_vulnerabilities("nginx", version="1.18.0")</invocation>
+  </example>
+  <example>
+    <description>Check WordPress for critical issues only</description>
+    <invocation>get_technology_vulnerabilities("wordpress", severity_filter="critical")</invocation>
+  </example>
+</tool>
+
+<tool name="clear_cve_cache">
+  <description>
+    Clear the CVE database cache to get fresh results.
+    Use when you need the most up-to-date vulnerability information.
+  </description>
+  <parameters>
+  </parameters>
+  <example>
+    <description>Clear cached vulnerability data</description>
+    <invocation>clear_cve_cache()</invocation>
+  </example>
+</tool>
+
+<tool name="get_cache_stats">
+  <description>
+    Get statistics about the CVE cache including entry count and TTL.
+    Useful for understanding cache state and rate limiting status.
+  </description>
+  <parameters>
+  </parameters>
+  <example>
+    <description>Check cache statistics</description>
+    <invocation>get_cache_stats()</invocation>
+  </example>
+</tool>
+
+</tools>

@@ -1,0 +1,176 @@
+# Multi-Agent Collaboration Protocol Guide
+
+## Overview
+This module provides guidance for efficient collaboration between multiple AI agents during security testing. Following this protocol prevents duplicate work, enables vulnerability chaining, and ensures comprehensive coverage.
+
+## Core Principles
+
+1. **Claim Before Testing**: Always claim targets before testing to prevent duplicates
+2. **Share All Findings**: Share vulnerabilities immediately for chaining opportunities
+3. **Use the Work Queue**: Add discovered targets to the queue for team coverage
+4. **Request Help**: Ask for specialized assistance when needed
+5. **Monitor Status**: Check collaboration status regularly
+
+## Collaboration Workflow
+
+### Starting a Test Session
+1. **Check Collaboration Status**: `get_collaboration_status()`
+   - See what other agents are testing
+   - Review recent findings for context
+   - Check pending work queue
+
+2. **Claim Your Target**: `claim_target(target, test_type)`
+   - Prevents duplicate testing
+   - Notifies other agents
+   - Sets expectations for duration
+
+3. **Perform Testing**: Execute your security tests
+
+4. **Share Findings**: `share_finding(...)` if you find vulnerabilities
+   - Include PoC and evidence
+   - Mark as chainable if applicable
+   - Suggest chaining opportunities
+
+5. **Release Claim**: `release_claim(...)` when done
+   - Allows others to test same target with different techniques
+
+### Claiming Protocol
+
+**DO Claim:**
+- Specific endpoint + test type: `/login` + `sqli`
+- Specific parameter + test type: `?id=` + `idor`
+- Specific functionality: `file upload` + `rce`
+
+**DON'T Claim:**
+- Entire domains (too broad)
+- Multiple test types at once (claim separately)
+- Already-claimed targets (check first!)
+
+### Finding Sharing Protocol
+
+When you find a vulnerability:
+
+```python
+share_finding(
+    agent_state,
+    title="SSRF in Image Fetcher",          # Brief, descriptive title
+    vulnerability_type="ssrf",               # Standard type
+    target="/api/fetch?url=",                # Specific target
+    description="Full description...",       # Detailed explanation
+    severity="high",                         # Accurate severity
+    poc="curl http://...",                   # Working PoC
+    evidence="Response showed internal IP",  # Proof of impact
+    chainable=True,                          # Can others chain this?
+    chain_suggestions=["idor", "auth_bypass"] # What to try
+)
+```
+
+### Chaining Strategy
+
+When you see a chainable finding:
+
+1. **Review the Finding**: `get_finding_details(finding_id)`
+2. **Understand the PoC**: How was it exploited?
+3. **Plan Your Chain**: What can you add?
+4. **Claim Your Test**: `claim_target(...)` with your chain attempt
+5. **Execute and Report**: Test and share results
+
+**Common Chain Combinations:**
+- SSRF → Cloud metadata → Credential theft
+- XSS → CSRF bypass → Account takeover
+- IDOR → Data access → Mass data exfiltration
+- SQLi → Auth bypass → Privilege escalation
+- Path traversal → Source code → Hardcoded credentials
+
+### Work Queue Management
+
+**Adding Targets:**
+When you discover new attack surface but can't test it:
+
+```python
+add_to_work_queue(
+    agent_state,
+    target="/api/v2/admin/users",
+    description="Admin endpoint found in JS bundle, requires auth testing",
+    test_types=["auth_bypass", "idor"],
+    priority="high",
+    source="JavaScript analysis"
+)
+```
+
+**Getting Work:**
+When ready for new targets:
+
+```python
+result = get_next_work_item(
+    agent_state,
+    preferred_test_types=["sqli", "xss"],  # Your specialties
+    min_priority="medium"                   # Skip low-priority items
+)
+```
+
+### Help Requests
+
+**When to Request Help:**
+- Encoded data you can't decode
+- Unfamiliar technology stack
+- Complex exploitation scenarios
+- Need second opinion on severity
+
+```python
+request_help(
+    agent_state,
+    help_type="decode",  # decode, analyze, exploit, bypass, escalate, other
+    description="JWT token with unusual structure, can't decode payload",
+    data="eyJ0eXAi...",
+    context="Found in Authorization header",
+    urgency="normal"
+)
+```
+
+### Communication
+
+**Broadcasting Important Information:**
+```python
+# Alert all agents to important finding
+broadcast_message(
+    agent_state,
+    "Found WAF - payloads need obfuscation. Working patterns: ...",
+    message_type="coordination",
+    priority="high"
+)
+```
+
+## Status Monitoring
+
+Run `get_collaboration_status()` periodically to:
+- Check your active claims
+- See team's progress
+- Review new findings
+- Pick up work items
+- Help with open requests
+
+## Best Practices
+
+1. **Be Specific**: Claim specific targets and test types
+2. **Be Quick**: Release claims promptly when done
+3. **Be Helpful**: Share findings with good detail
+4. **Be Responsive**: Check help requests regularly
+5. **Be Coordinated**: Use the status dashboard
+
+## Avoiding Common Mistakes
+
+❌ **Don't**: Claim broad targets like "the entire API"
+✅ **Do**: Claim specific endpoints with specific test types
+
+❌ **Don't**: Keep claims forever
+✅ **Do**: Release claims as soon as testing completes
+
+❌ **Don't**: Keep findings to yourself
+✅ **Do**: Share immediately for chaining opportunities
+
+❌ **Don't**: Duplicate work blindly
+✅ **Do**: Check claims before starting any test
+
+❌ **Don't**: Ignore help requests
+✅ **Do**: Help team members when you can
