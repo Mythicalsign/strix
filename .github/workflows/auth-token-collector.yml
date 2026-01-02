@@ -52,6 +52,23 @@ jobs:
           mkdir -p ~/.cli-proxy-api
           mkdir -p ./auth-urls
 
+      - name: Create server configuration
+        run: |
+          cat > config.yaml << 'EOF'
+          server:
+            port: 8080
+            host: "0.0.0.0"
+          
+          providers:
+            qwen:
+              enabled: true
+          
+          logging:
+            level: "info"
+          EOF
+          
+          echo "Configuration created"
+
       - name: Start authentication server and generate login URLs
         run: |
           echo "=========================================="
@@ -60,8 +77,8 @@ jobs:
           echo ""
           echo "Starting authentication server..."
           
-          # Start the CLI Proxy API server in background
-          nohup cli-proxy-api --port 8080 --auth-dir ~/.cli-proxy-api > server.log 2>&1 &
+          # Start the CLI Proxy API server in background with config file
+          nohup cli-proxy-api -config config.yaml > server.log 2>&1 &
           SERVER_PID=$!
           echo $SERVER_PID > server.pid
           
@@ -86,16 +103,17 @@ jobs:
             echo "📱 ACCOUNT $i LOGIN URL:"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # Trigger Qwen login and capture the URL
-            timeout 30s cli-proxy-api --qwen-login --auth-dir ~/.cli-proxy-api 2>&1 | tee login-$i.log &
+            # Trigger Qwen login and capture the URL - no flags needed
+            (timeout 30s cli-proxy-api -qwen-login -no-browser 2>&1 || true) | tee login-$i.log &
             LOGIN_PID=$!
             
-            # Wait a moment for the URL to be generated
-            sleep 3
+            # Wait for the URL to be generated
+            sleep 5
             
             # Extract the OAuth URL from logs
             if [ -f login-$i.log ]; then
-              grep -o 'https://[^"]*' login-$i.log | head -1 || echo "Waiting for URL..."
+              URL=$(grep -oP 'https://[^\s]+' login-$i.log | head -1 || echo "Waiting for URL...")
+              echo "$URL"
             fi
             
             echo ""
@@ -104,7 +122,7 @@ jobs:
             echo ""
             
             # Save URL to file
-            grep -o 'https://[^"]*' login-$i.log | head -1 > ./auth-urls/account-$i-url.txt || true
+            grep -oP 'https://[^\s]+' login-$i.log | head -1 > ./auth-urls/account-$i-url.txt || true
             
             # Wait for user to complete OAuth (with timeout)
             sleep 30
