@@ -1,190 +1,233 @@
-name: Qwen Code Token Collector
+name: Qwen Code Multi-Account Token Collection
 
 on:
   workflow_dispatch:
     inputs:
-      accounts_count:
-        description: 'Number of Qwen Code accounts to authenticate (1-10)'
+      num_accounts:
+        description: 'Number of Qwen Code accounts to authenticate'
         required: true
         default: '3'
-        type: string
-      encryption_key:
-        description: 'Encryption key for securing tokens (keep this secret!)'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+          - '6'
+          - '7'
+          - '8'
+          - '9'
+          - '10'
+      encryption_password:
+        description: 'Password for encrypting tokens (remember this!)'
         required: true
         type: string
 
 jobs:
   collect-tokens:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 60
+    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Go environment
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
 
-    # ----------------------------------------------------------
-    #  FIXED DOWNLOAD STEP – no more 404
-    # ----------------------------------------------------------
-    - name: Download CLIProxyAPI
-      run: |
-        set -euo pipefail
-        LATEST_RELEASE=$(curl -s https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest | jq -r .tag_name)
-        echo "Latest release: $LATEST_RELEASE"
+      - name: Install CLIProxyAPI
+        run: |
+          git clone https://github.com/router-for-me/CLIProxyAPI.git
+          cd CLIProxyAPI
+          go build -o cli-proxy-api ./cmd/server
+          sudo mv cli-proxy-api /usr/local/bin/
+          cd ..
+          rm -rf CLIProxyAPI
 
-        curl -L -o cliproxy.tar.gz \
-          "https://github.com/router-for-me/CLIProxyAPI/releases/download/${LATEST_RELEASE}/CLIProxyAPI_${LATEST_RELEASE}_linux_amd64.tar.gz"
+      - name: Create auth directory
+        run: |
+          mkdir -p ~/.cli-proxy-api
+          mkdir -p ./auth-urls
 
-        tar -xzf cliproxy.tar.gz
-        BINARY=$(find . -type f -executable -iname '*cliproxyapi*' | head -n 1)
-        ln -sf "$BINARY" cli-proxy-api
-        chmod +x cli-proxy-api
-        ./cli-proxy-api --version || echo "Version check failed, continuing…"
+      - name: Start authentication server and generate login URLs
+        run: |
+          echo "=========================================="
+          echo "QWEN CODE AUTHENTICATION URLS"
+          echo "=========================================="
+          echo ""
+          echo "Starting authentication server..."
+          
+          # Start the CLI Proxy API server in background
+          nohup cli-proxy-api --port 8080 --auth-dir ~/.cli-proxy-api > server.log 2>&1 &
+          SERVER_PID=$!
+          echo $SERVER_PID > server.pid
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Check if server is running
+          if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo "Error: Server failed to start"
+            cat server.log
+            exit 1
+          fi
+          
+          echo "Server started successfully (PID: $SERVER_PID)"
+          echo ""
+          echo "⚠️  IMPORTANT: Complete each OAuth flow within 10 minutes"
+          echo ""
+          
+          # Generate login URL for each account
+          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📱 ACCOUNT $i LOGIN URL:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # Trigger Qwen login and capture the URL
+            timeout 30s cli-proxy-api --qwen-login --auth-dir ~/.cli-proxy-api 2>&1 | tee login-$i.log &
+            LOGIN_PID=$!
+            
+            # Wait a moment for the URL to be generated
+            sleep 3
+            
+            # Extract the OAuth URL from logs
+            if [ -f login-$i.log ]; then
+              grep -o 'https://[^"]*' login-$i.log | head -1 || echo "Waiting for URL..."
+            fi
+            
+            echo ""
+            echo "👆 Click the URL above to authenticate account $i"
+            echo "After completing login, wait 30 seconds before the next account"
+            echo ""
+            
+            # Save URL to file
+            grep -o 'https://[^"]*' login-$i.log | head -1 > ./auth-urls/account-$i-url.txt || true
+            
+            # Wait for user to complete OAuth (with timeout)
+            sleep 30
+            
+            # Kill the login process
+            kill $LOGIN_PID 2>/dev/null || true
+          done
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "⏰ Waiting 5 minutes for all OAuth flows to complete..."
+          echo "You have until $(date -d '+5 minutes' '+%H:%M:%S') to finish all logins"
+          echo ""
+          
+          # Wait 5 minutes for all OAuth completions
+          sleep 300
+          
+          # Stop the server
+          kill $SERVER_PID 2>/dev/null || true
 
-    - name: Create authentication directory
-      run: mkdir -p ./auths
+      - name: Display all authentication URLs in summary
+        run: |
+          echo "## 🔐 Qwen Code Authentication URLs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Complete the OAuth flow for each account by clicking the URLs below:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
+            echo "### Account $i" >> $GITHUB_STEP_SUMMARY
+            if [ -f ./auth-urls/account-$i-url.txt ]; then
+              URL=$(cat ./auth-urls/account-$i-url.txt)
+              echo "- [🔗 Click here to login]($URL)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ⚠️  URL not generated - check logs" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "⏰ **Complete all logins within 10 minutes**" >> $GITHUB_STEP_SUMMARY
 
-    - name: Create base configuration
-      run: |
-        cat > config.yaml <<'EOF'
-        port: 8317
-        auth-dir: "./auths"
-        request-retry: 3
+      - name: Verify collected tokens
+        run: |
+          echo "Checking for authenticated tokens..."
+          echo ""
+          
+          TOKEN_COUNT=$(ls ~/.cli-proxy-api/qwen-*.json 2>/dev/null | wc -l)
+          
+          if [ "$TOKEN_COUNT" -eq "0" ]; then
+            echo "❌ No tokens found!"
+            echo "Please make sure you completed the OAuth flows."
+            ls -la ~/.cli-proxy-api/
+            exit 1
+          fi
+          
+          echo "✅ Found $TOKEN_COUNT token file(s):"
+          ls -la ~/.cli-proxy-api/qwen-*.json
+          
+          if [ "$TOKEN_COUNT" -lt "${{ github.event.inputs.num_accounts }}" ]; then
+            echo ""
+            echo "⚠️  Warning: Expected ${{ github.event.inputs.num_accounts }} tokens but found $TOKEN_COUNT"
+            echo "Some OAuth flows may not have completed successfully."
+          fi
 
-        quota-exceeded:
-          switch-project: true
-          switch-preview-model: true
+      - name: Collect and encrypt tokens
+        run: |
+          cd ~/.cli-proxy-api
+          
+          # Create tarball of all Qwen tokens
+          tar -czf qwen-tokens.tar.gz qwen-*.json
+          echo "✅ Tokens collected in tarball"
+          
+          # Use user-provided password for encryption
+          USER_PASSWORD="${{ github.event.inputs.encryption_password }}"
+          
+          # Encrypt the tokens
+          echo "$USER_PASSWORD" | openssl enc -aes-256-cbc -salt -pbkdf2 -in qwen-tokens.tar.gz -out qwen-tokens.enc -pass stdin
+          echo "✅ Tokens encrypted with your password"
+          
+          # Base64 encode for GitHub Secrets
+          base64 -w 0 qwen-tokens.enc > qwen-tokens.b64
+          echo "✅ Tokens base64 encoded"
+          
+          # Display results
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📦 ENCRYPTED TOKENS READY"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Encrypted token size: $(stat -c%s qwen-tokens.b64) bytes"
+          echo ""
 
-        api-keys:
-          - "temp-collector-key-$(date +%s)"
+      - name: Prepare GitHub Secrets instructions
+        run: |
+          cd ~/.cli-proxy-api
+          
+          # Read the encrypted token
+          ENCRYPTED_TOKEN=$(cat qwen-tokens.b64)
+          
+          echo "## 🎉 Tokens Successfully Collected!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Your Qwen Code tokens have been encrypted and are ready to upload to GitHub Secrets." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Instructions:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Go to your repository **Settings** → **Secrets and variables** → **Actions**" >> $GITHUB_STEP_SUMMARY
+          echo "2. Click **New repository secret**" >> $GITHUB_STEP_SUMMARY
+          echo "3. Create the following secret:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Secret Name: \`QWEN_TOKENS\`" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$ENCRYPTED_TOKEN" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Important:** Remember your encryption password - you'll need it to decrypt!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ After creating this secret, use the **CLIProxyAPI Server** workflow to start your API endpoint!" >> $GITHUB_STEP_SUMMARY
 
-        providers:
-          qwen:
-            enabled: true
-            load-balance: true
-            accounts: []
-        EOF
-
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-
-    - name: Install Python dependencies
-      run: pip install requests cryptography json5 pyyaml
-
-    - name: Create token-collection script
-      run: |
-        cat > collect_tokens.py <<'PY'
-        import os, json, time, sys, subprocess, base64, hashlib
-        from pathlib import Path
-        from cryptography.fernet import Fernet
-
-        def create_key(pw: str) -> bytes:
-            return base64.urlsafe_b64encode(hashlib.sha256(pw.encode()).digest())
-
-        def encrypt(data: dict, pw: str) -> str:
-            f = Fernet(create_key(pw))
-            return base64.b64encode(f.encrypt(json.dumps(data).encode())).decode()
-
-        def fake_auth(i: int):
-            return {
-                "provider": "qwen",
-                "account_id": f"qwen_account_{i}",
-                "access_token": f"qwen_access_token_{i}_{int(time.time())}",
-                "refresh_token": f"qwen_refresh_token_{i}_{int(time.time())}",
-                "expires_at": int(time.time()) + 3600,
-                "email": f"user{i}@example.com",
-                "created_at": int(time.time()),
-                "last_used": int(time.time())
-            }
-
-        def main():
-            cnt = int(os.environ.get("INPUT_ACCOUNTS_COUNT", 3))
-            key = os.environ.get("INPUT_ENCRYPTION_KEY", "")
-            if not key:
-                print("ERROR: encryption key missing")
-                sys.exit(1)
-
-            tokens = {"provider": "qwen", "accounts": [], "created_at": int(time.time()), "format_version": "1.0"}
-            for i in range(1, cnt + 1):
-                tokens["accounts"].append(fake_auth(i))
-                if i < cnt:
-                    time.sleep(2)
-
-            if not tokens["accounts"]:
-                print("ERROR: no tokens collected")
-                sys.exit(1)
-
-            enc = encrypt(tokens, key)
-            Path("qwen_tokens_encrypted.txt").write_text(enc)
-            with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
-                gh.write(f"encrypted_tokens={enc}\n")
-                gh.write(f"accounts_count={len(tokens['accounts'])}\n")
-
-        if __name__ == "__main__":
-            main()
-        PY
-
-    - name: Collect tokens
-      id: collect
-      env:
-        INPUT_ACCOUNTS_COUNT: ${{ inputs.accounts_count }}
-        INPUT_ENCRYPTION_KEY: ${{ inputs.encryption_key }}
-      run: python collect_tokens.py
-
-    - name: Create instructions file
-      run: |
-        cat > SETUP_INSTRUCTIONS.md <<'EOF'
-        # Qwen Code Token Collection Results
-        - Accounts processed: ${{ steps.collect.outputs.accounts_count }}
-        - Encryption: AES-256 (your key)
-        - Format: base64-encoded encrypted JSON
-
-        ## Next steps
-        1. Copy the encrypted blob printed below.
-        2. Go to Settings → Secrets → Actions → New secret.
-        3. Name: `QWEN_TOKENS`
-        4. Value: paste the blob.
-        5. Run the Load-Balancer workflow – your endpoint will start automatically.
-
-        ## Security
-        - Store the encryption key safely; you’ll need it again.
-        - Tokens are refreshed automatically by CLIProxyAPI.
-        EOF
-
-    - name: Display results
-      run: |
-        echo "=================================="
-        echo "TOKEN COLLECTION COMPLETED"
-        echo "=================================="
-        echo "📊 Accounts : ${{ steps.collect.outputs.accounts_count }}"
-        echo "🔐 Encryption: enabled"
-        echo ""
-        echo "🔑 ENCRYPTED TOKENS (copy into GitHub secret 'QWEN_TOKENS'):"
-        echo "=================================="
-        cat qwen_tokens_encrypted.txt
-        echo ""
-        echo "=================================="
-        echo "⚠️  Keep your encryption key safe – you’ll need it for the load-balancer!"
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: qwen-token-collection-results
-        path: |
-          qwen_tokens_encrypted.txt
-          SETUP_INSTRUCTIONS.md
-          config.yaml
-        retention-days: 1
-
-    - name: Cleanup sensitive files
-      if: always()
-      run: |
-        rm -f collect_tokens.py
-        rm -rf ./auths
-        
+      - name: Upload token files as artifacts (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-encrypted-tokens
+          path: ~/.cli-proxy-api/qwen-tokens.b64
+          retention-days: 1
