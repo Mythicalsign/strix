@@ -89,6 +89,17 @@ jobs:
           echo "⚠️  IMPORTANT: Complete each OAuth flow within 5 minutes"
           echo ""
           
+          # Get the full path to config file
+          CONFIG_PATH="$(pwd)/config.yaml"
+          echo "Using config at: $CONFIG_PATH"
+          
+          # Verify config exists
+          if [ ! -f "$CONFIG_PATH" ]; then
+            echo "Error: Config file not found at $CONFIG_PATH"
+            exit 1
+          fi
+          echo ""
+          
           # Generate login URL for each account
           echo "Generating login URLs for all ${{ github.event.inputs.num_accounts }} accounts..."
           echo ""
@@ -98,8 +109,8 @@ jobs:
             echo "📱 ACCOUNT $i LOGIN URL:"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # Trigger Qwen login and capture the URL - no flags needed
-            (timeout 10s cli-proxy-api -qwen-login -no-browser 2>&1 || true) | tee login-$i.log &
+            # Trigger Qwen login with explicit config path
+            (timeout 10s cli-proxy-api -config "$CONFIG_PATH" -qwen-login -no-browser 2>&1 || true) | tee login-$i.log &
             LOGIN_PID=$!
             
             # Wait for the URL to be generated
