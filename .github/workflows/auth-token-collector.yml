@@ -49,12 +49,20 @@ jobs:
 
       - name: Create auth directory
         run: |
-          # Create the auth directory with full path
+          # Create the main auth directory
           AUTH_DIR="$HOME/.cli-proxy-api"
           mkdir -p "$AUTH_DIR"
           chmod 700 "$AUTH_DIR"
           
-          # Verify it exists
+          # Create separate directories for each account
+          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
+            ACCOUNT_DIR="$AUTH_DIR/account-$i"
+            mkdir -p "$ACCOUNT_DIR"
+            chmod 700 "$ACCOUNT_DIR"
+            echo "Created directory for account $i: $ACCOUNT_DIR"
+          done
+          
+          # Verify main directory exists
           if [ ! -d "$AUTH_DIR" ]; then
             echo "Failed to create auth directory"
             exit 1
@@ -63,20 +71,26 @@ jobs:
           # Create the auth-urls directory
           mkdir -p ./auth-urls
           
-          echo "Auth directory created at: $AUTH_DIR"
+          echo ""
+          echo "Auth directory structure:"
           ls -la "$AUTH_DIR"
+          echo ""
+          ls -la "$AUTH_DIR"/*/ 2>/dev/null || true
 
       - name: Create minimal config file
         run: |
-          # CLIProxyAPI requires a config file even for login commands
-          cat > config.yaml << EOF
-          port: 8080
-          auth-dir: "$HOME/.cli-proxy-api"
+          # Create a separate config file for each account with its own auth-dir
+          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
+            cat > config-account-$i.yaml << EOF
+          port: $((8080 + i - 1))
+          auth-dir: "$HOME/.cli-proxy-api/account-$i"
           debug: false
           EOF
-          
-          echo "Config file created at: $(pwd)/config.yaml"
-          cat config.yaml
+            
+            echo "Config file created for account $i:"
+            cat config-account-$i.yaml
+            echo ""
+          done
 
       - name: Generate login URLs for all accounts
         run: |
@@ -111,7 +125,15 @@ jobs:
             echo "📱 ACCOUNT $i LOGIN URL:"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # Trigger Qwen login with explicit config path
+            # Use account-specific config file
+            CONFIG_PATH="$(pwd)/config-account-$i.yaml"
+            
+            if [ ! -f "$CONFIG_PATH" ]; then
+              echo "Error: Config file not found at $CONFIG_PATH"
+              exit 1
+            fi
+            
+            # Trigger Qwen login with account-specific config
             (timeout 10s cli-proxy-api -config "$CONFIG_PATH" -qwen-login -no-browser 2>&1 || true) | tee login-$i.log &
             LOGIN_PID=$!
             
@@ -157,8 +179,13 @@ jobs:
           echo ""
           
           while [ $ELAPSED -lt $MAX_WAIT ]; do
-            # Count current token files
-            CURRENT_TOKENS=$(ls ~/.cli-proxy-api/qwen-*.json 2>/dev/null | wc -l)
+            # Count current token files across all account directories
+            CURRENT_TOKENS=0
+            for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
+              if ls ~/.cli-proxy-api/account-$i/qwen-*.json 2>/dev/null | grep -q .; then
+                CURRENT_TOKENS=$((CURRENT_TOKENS + 1))
+              fi
+            done
             
             if [ "$CURRENT_TOKENS" -ge "$EXPECTED_TOKENS" ]; then
               echo ""
@@ -176,8 +203,13 @@ jobs:
             ELAPSED=$((ELAPSED + CHECK_INTERVAL))
           done
           
-          # Final check
-          FINAL_COUNT=$(ls ~/.cli-proxy-api/qwen-*.json 2>/dev/null | wc -l)
+          # Final check - count tokens across all account directories
+          FINAL_COUNT=0
+          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
+            if ls ~/.cli-proxy-api/account-$i/qwen-*.json 2>/dev/null | grep -q .; then
+              FINAL_COUNT=$((FINAL_COUNT + 1))
+            fi
+          done
           
           if [ "$FINAL_COUNT" -lt "$EXPECTED_TOKENS" ]; then
             echo ""
@@ -214,7 +246,22 @@ jobs:
           echo "Verifying collected tokens..."
           echo ""
           
-          TOKEN_COUNT=$(ls ~/.cli-proxy-api/qwen-*.json 2>/dev/null | wc -l)
+          # Check each account directory
+          TOKEN_COUNT=0
+          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
+            ACCOUNT_DIR="$HOME/.cli-proxy-api/account-$i"
+            if ls "$ACCOUNT_DIR"/qwen-*.json 2>/dev/null | grep -q .; then
+              TOKEN_COUNT=$((TOKEN_COUNT + 1))
+              echo "✅ Account $i: Token found"
+              ls -la "$ACCOUNT_DIR"/qwen-*.json
+            else
+              echo "❌ Account $i: No token found"
+            fi
+          done
+          
+          echo ""
+          echo "Total tokens collected: $TOKEN_COUNT/${{ github.event.inputs.num_accounts }}"
+          echo ""
           
           if [ "$TOKEN_COUNT" -eq "0" ]; then
             echo "❌ No tokens found!"
@@ -225,13 +272,8 @@ jobs:
             echo "2. Complete the authentication in your browser"
             echo "3. Wait for the 'authenticated successfully' message"
             echo ""
-            ls -la ~/.cli-proxy-api/
             exit 1
           fi
-          
-          echo "✅ Successfully collected $TOKEN_COUNT token file(s):"
-          ls -la ~/.cli-proxy-api/qwen-*.json
-          echo ""
           
           if [ "$TOKEN_COUNT" -lt "${{ github.event.inputs.num_accounts }}" ]; then
             echo "⚠️  Warning: Expected ${{ github.event.inputs.num_accounts }} tokens but found $TOKEN_COUNT"
@@ -245,9 +287,36 @@ jobs:
 
       - name: Collect and encrypt tokens
         run: |
-          cd ~/.cli-proxy-api
+          echo "Collecting tokens from all account directories..."
+          echo ""
           
-          # Create tarball of all Qwen tokens
+          # Create a temporary directory to collect all tokens
+          TEMP_DIR=$(mktemp -d)
+          
+          # Copy all token files to temp directory with unique names
+          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
+            ACCOUNT_DIR="$HOME/.cli-proxy-api/account-$i"
+            if ls "$ACCOUNT_DIR"/qwen-*.json 2>/dev/null | grep -q .; then
+              # Rename token to include account number to avoid conflicts
+              cp "$ACCOUNT_DIR"/qwen-*.json "$TEMP_DIR/qwen-account-$i.json"
+              echo "✅ Collected token from account $i"
+            fi
+          done
+          
+          # Verify we have tokens
+          TOKEN_COUNT=$(ls "$TEMP_DIR"/qwen-*.json 2>/dev/null | wc -l)
+          if [ "$TOKEN_COUNT" -eq "0" ]; then
+            echo "❌ No tokens to encrypt!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "Tokens to be encrypted:"
+          ls -la "$TEMP_DIR"/qwen-*.json
+          echo ""
+          
+          # Create tarball of all collected tokens
+          cd "$TEMP_DIR"
           tar -czf qwen-tokens.tar.gz qwen-*.json
           echo "✅ Tokens collected in tarball"
           
@@ -262,21 +331,26 @@ jobs:
           base64 -w 0 qwen-tokens.enc > qwen-tokens.b64
           echo "✅ Tokens base64 encoded"
           
+          # Move the final file to home directory for later access
+          mv qwen-tokens.b64 "$HOME/"
+          
           # Display results
           echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "📦 ENCRYPTED TOKENS READY"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
-          echo "Encrypted token size: $(stat -c%s qwen-tokens.b64) bytes"
+          echo "Number of accounts: $TOKEN_COUNT"
+          echo "Encrypted token size: $(stat -c%s "$HOME/qwen-tokens.b64") bytes"
           echo ""
+          
+          # Cleanup temp directory
+          rm -rf "$TEMP_DIR"
 
       - name: Prepare GitHub Secrets instructions
         run: |
-          cd ~/.cli-proxy-api
-          
-          # Read the encrypted token
-          ENCRYPTED_TOKEN=$(cat qwen-tokens.b64)
+          # Read the encrypted token from home directory
+          ENCRYPTED_TOKEN=$(cat "$HOME/qwen-tokens.b64")
           
           echo "## 🎉 Tokens Successfully Collected!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -303,5 +377,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qwen-encrypted-tokens
-          path: ~/.cli-proxy-api/qwen-tokens.b64
+          path: ~/qwen-tokens.b64
           retention-days: 1
