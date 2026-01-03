@@ -49,52 +49,32 @@ jobs:
 
       - name: Create auth directory
         run: |
-          mkdir -p ~/.cli-proxy-api
+          # Create the auth directory with full path
+          AUTH_DIR="$HOME/.cli-proxy-api"
+          mkdir -p "$AUTH_DIR"
+          chmod 700 "$AUTH_DIR"
+          
+          # Verify it exists
+          if [ ! -d "$AUTH_DIR" ]; then
+            echo "Failed to create auth directory"
+            exit 1
+          fi
+          
+          # Create the auth-urls directory
           mkdir -p ./auth-urls
+          
+          echo "Auth directory created at: $AUTH_DIR"
+          ls -la "$AUTH_DIR"
 
-      - name: Create server configuration
-        run: |
-          cat > config.yaml << 'EOF'
-          server:
-            port: 8080
-            host: "0.0.0.0"
-          
-          providers:
-            qwen:
-              enabled: true
-          
-          logging:
-            level: "info"
-          EOF
-          
-          echo "Configuration created"
-
-      - name: Start authentication server and generate login URLs
+      - name: Generate login URLs directly (no server needed)
         run: |
           echo "=========================================="
           echo "QWEN CODE AUTHENTICATION URLS"
           echo "=========================================="
           echo ""
-          echo "Starting authentication server..."
-          
-          # Start the CLI Proxy API server in background with config file
-          nohup cli-proxy-api -config config.yaml > server.log 2>&1 &
-          SERVER_PID=$!
-          echo $SERVER_PID > server.pid
-          
-          # Wait for server to start
-          sleep 5
-          
-          # Check if server is running
-          if ! kill -0 $SERVER_PID 2>/dev/null; then
-            echo "Error: Server failed to start"
-            cat server.log
-            exit 1
-          fi
-          
-          echo "Server started successfully (PID: $SERVER_PID)"
+          echo "Generating login URLs for all ${{ github.event.inputs.num_accounts }} accounts..."
           echo ""
-          echo "⚠️  IMPORTANT: Complete each OAuth flow within 10 minutes"
+          echo "⚠️  IMPORTANT: Complete each OAuth flow within 5 minutes"
           echo ""
           
           # Generate login URL for each account
@@ -144,9 +124,6 @@ jobs:
           
           # Wait 5 minutes for all OAuth completions
           sleep 300
-          
-          # Stop the server
-          kill $SERVER_PID 2>/dev/null || true
           
           echo ""
           echo "⏱️  Authentication window closed. Collecting tokens..."
