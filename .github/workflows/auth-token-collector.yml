@@ -99,21 +99,6 @@ jobs:
           echo "=========================================="
           echo ""
           
-          # Get the full path to config file
-          CONFIG_PATH="$(pwd)/config.yaml"
-          echo "Using config at: $CONFIG_PATH"
-          
-          # Verify config exists
-          if [ ! -f "$CONFIG_PATH" ]; then
-            echo "Error: Config file not found at $CONFIG_PATH"
-            ls -la "$(pwd)"
-            exit 1
-          fi
-          
-          echo "Config verified. Contents:"
-          cat "$CONFIG_PATH"
-          echo ""
-          
           echo "Generating login URLs for all ${{ github.event.inputs.num_accounts }} accounts..."
           echo ""
           echo "⚠️  IMPORTANT: Complete each OAuth flow within 5 minutes"
