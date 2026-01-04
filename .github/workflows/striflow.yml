@@ -218,35 +218,32 @@ jobs:
           AUTH_DIR="$HOME/.cli-proxy-api"
           
           # Create configuration file (using EOF without quotes to allow variable expansion)
-          cat > "$AUTH_DIR/config.yaml" << EOF
+          cat > "$AUTH_DIR/config.yaml" << 'CONFIGEOF'
           server:
-            port: ${CLIPROXY_PORT}
+            port: __CLIPROXY_PORT__
             host: "0.0.0.0"
-          
           providers:
             qwen:
               enabled: true
               load-balance: true
               round-robin: true
               health-check: true
-          
-          auth-dir: "${AUTH_DIR}"
-          
+          auth-dir: "__AUTH_DIR__"
           quota-exceeded:
             switch-project: true
             switch-preview-model: true
-          
           request-retry: 3
           timeout: "300s"
-          
           logging:
             level: "info"
-            file: "${AUTH_DIR}/cliproxy.log"
-          
+            file: "__AUTH_DIR__/cliproxy.log"
           cors:
             enabled: true
             origins: ["*"]
-          EOF
+          CONFIGEOF
+          
+          # Replace placeholders with actual values and remove leading spaces
+          sed -i "s|__CLIPROXY_PORT__|${CLIPROXY_PORT}|g; s|__AUTH_DIR__|${AUTH_DIR}|g; s/^          //g" "$AUTH_DIR/config.yaml"
           
           echo "Configuration created at $AUTH_DIR/config.yaml"
           cat "$AUTH_DIR/config.yaml"
@@ -358,7 +355,7 @@ jobs:
           
           # Create config in both the checkout directory AND /tmp/strix for Strix to find it
           for CONFIG_DIR in "$GITHUB_WORKSPACE" "/tmp/strix"; do
-            cat > "$CONFIG_DIR/config.json" << EOF
+            cat > "$CONFIG_DIR/config.json" << JSONEOF
           {
             "api": {
               "endpoint": "${CLIPROXY_ENDPOINT}",
@@ -387,7 +384,9 @@ jobs:
             },
             "perplexity_api_key": "${PERPLEXITY_API_KEY:-}"
           }
-          EOF
+          JSONEOF
+            # Remove leading spaces from the JSON file
+            sed -i 's/^          //g' "$CONFIG_DIR/config.json"
             echo "Created config.json at $CONFIG_DIR"
           done
           
