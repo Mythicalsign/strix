@@ -278,7 +278,7 @@ jobs:
           echo "Installing CLIProxyAPI from source..."
           
           # Clone CLIProxyAPI repository (using luispater's repo which is the main source)
-          git clone https://github.com/luispater/CLIProxyAPI.git /tmp/CLIProxyAPI
+          git clone https://github.com/router-for-me/CLIProxyAPI.git /tmp/CLIProxyAPI
           cd /tmp/CLIProxyAPI
           
           # Build from source
