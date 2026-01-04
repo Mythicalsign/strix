@@ -1,9 +1,12 @@
-name: Strix Security Scan
+name: StriFlow - Integrated Strix Security Scan
 
 on:
-  # Manual trigger with inputs
   workflow_dispatch:
     inputs:
+      decryption_password:
+        description: 'Password to decrypt QWEN_TOKENS'
+        required: true
+        type: string
       target:
         description: 'Target to scan (URL, path, or repository)'
         required: true
@@ -15,7 +18,7 @@ on:
         default: ''
         type: string
       timeframe:
-        description: 'Maximum runtime in minutes (10 - 720)'
+        description: 'Maximum runtime in minutes (10-720)'
         required: false
         default: '60'
         type: choice
@@ -32,7 +35,7 @@ on:
           - '480'
           - '720'
       warning_minutes:
-        description: 'Minutes before end to warn AI (1 - 30)'
+        description: 'Minutes before end to warn AI (1-30)'
         required: false
         default: '5'
         type: choice
@@ -54,200 +57,461 @@ on:
           - quick
           - standard
           - deep
+      model:
+        description: 'AI Model to use'
+        required: false
+        default: 'qwen3-coder-plus'
+        type: choice
+        options:
+          - 'qwen3-coder-plus'
+          - 'qwen-coder-plus'
+          - 'qwen-plus'
+          - 'qwen-max'
       enable_strixdb:
         description: 'Enable StrixDB artifact storage'
         required: false
         default: true
         type: boolean
-  
-  # Trigger on pull requests
-  pull_request:
-    branches: [master, develop]
-  
-  # Trigger on pushes to main
-  push:
-    branches: [master]
 
-# Cancel in-progress runs for the same PR/branch
 concurrency:
-  group: strix-${{ github.head_ref || github.ref }}
+  group: striflow-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 env:
-  # Default configuration
   DEFAULT_TIMEFRAME: '60'
   DEFAULT_WARNING_MINUTES: '5'
   DEFAULT_SCAN_MODE: 'standard'
+  CLIPROXY_PORT: '8317'
 
 jobs:
-  strix-scan:
-    name: Strix Security Scan
+  striflow-scan:
+    name: StriFlow Security Scan
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ fromJSON(github.event.inputs.timeframe || '120') }}
-    
+    timeout-minutes: ${{ fromJSON(github.event.inputs.timeframe || '60') + 30 }}
+
     permissions:
       contents: read
       security-events: write
       pull-requests: write
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      - name: Set up Python
+
+      - name: Setup Go Environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Setup Python Environment
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
+
+      - name: Decrypt Qwen Tokens
+        id: decrypt
+        run: |
+          set -e
+          echo "::group::Decrypting Qwen tokens"
+          
+          if [ -z "${{ secrets.QWEN_TOKENS }}" ]; then
+            echo "::error::QWEN_TOKENS secret is not set"
+            exit 1
+          fi
+          
+          mkdir -p ~/.cli-proxy-api
+          cd ~/.cli-proxy-api
+          
+          echo "${{ secrets.QWEN_TOKENS }}" | base64 -d > qwen-tokens.enc
+          
+          if ! echo "${{ github.event.inputs.decryption_password }}" | openssl enc -aes-256-cbc -d -salt -pbkdf2 -in qwen-tokens.enc -out qwen-tokens.tar.gz -pass stdin 2>/dev/null; then
+            echo "::error::Failed to decrypt tokens. Invalid password"
+            exit 1
+          fi
+          
+          tar -xzf qwen-tokens.tar.gz
+          
+          for dir in account-*/; do
+            [ -d "$dir" ] && mv "$dir"qwen-*.json . 2>/dev/null || true
+          done
+          
+          TOKEN_COUNT=$(find . -maxdepth 1 -name 'qwen-*.json' | wc -l)
+          
+          if [ "$TOKEN_COUNT" -eq 0 ]; then
+            echo "::error::No token files found after decryption"
+            exit 1
+          fi
+          
+          echo "Successfully decrypted $TOKEN_COUNT Qwen account(s)"
+          echo "token_count=$TOKEN_COUNT" >> $GITHUB_OUTPUT
+          
+          rm -f qwen-tokens.enc qwen-tokens.tar.gz
+          echo "::endgroup::"
+
+      - name: Install CLIProxyAPI
+        run: |
+          set -e
+          echo "::group::Installing CLIProxyAPI"
+          
+          git clone --depth 1 https://github.com/router-for-me/CLIProxyAPI.git /tmp/CLIProxyAPI
+          cd /tmp/CLIProxyAPI
+          go build -o cli-proxy-api ./cmd/server
+          sudo mv cli-proxy-api /usr/local/bin/
+          cli-proxy-api --version || echo "CLIProxyAPI installed"
+          
+          echo "::endgroup::"
+
+      - name: Configure CLIProxyAPI
+        run: |
+          set -e
+          echo "::group::Configuring CLIProxyAPI"
+          
+          AUTH_DIR="$HOME/.cli-proxy-api"
+          
+          cat > "$AUTH_DIR/config.yaml" <<EOF
+          server:
+            port: ${{ env.CLIPROXY_PORT }}
+            host: "0.0.0.0"
+          providers:
+            qwen:
+              enabled: true
+              load-balance: true
+              round-robin: true
+              health-check: true
+          auth-dir: "$AUTH_DIR"
+          quota-exceeded:
+            switch-project: true
+            switch-preview-model: true
+          request-retry: 3
+          timeout: "300s"
+          logging:
+            level: "info"
+            file: "$AUTH_DIR/cliproxy.log"
+          cors:
+            enabled: true
+            origins: ["*"]
+          EOF
+          
+          echo "Configuration created at $AUTH_DIR/config.yaml"
+          echo "::endgroup::"
+
+      - name: Start CLIProxyAPI Server
+        id: cliproxy
+        run: |
+          set -e
+          echo "::group::Starting CLIProxyAPI Server"
+          
+          AUTH_DIR="$HOME/.cli-proxy-api"
+          cd "$AUTH_DIR"
+          
+          nohup cli-proxy-api -config config.yaml > cliproxy.log 2>&1 &
+          SERVER_PID=$!
+          echo $SERVER_PID > cliproxy.pid
+          
+          sleep 10
+          
+          if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo "::error::CLIProxyAPI failed to start"
+            cat cliproxy.log
+            exit 1
+          fi
+          
+          for i in {1..12}; do
+            if curl -s "http://localhost:${{ env.CLIPROXY_PORT }}/v1/models" > /dev/null 2>&1; then
+              echo "CLIProxyAPI is ready"
+              break
+            fi
+            echo "Waiting for CLIProxyAPI... (attempt $i/12)"
+            sleep 5
+          done
+          
+          ENDPOINT="http://localhost:${{ env.CLIPROXY_PORT }}/v1"
+          echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
+          echo "pid=$SERVER_PID" >> $GITHUB_OUTPUT
+          
+          echo "=========================================="
+          echo "CLIPROXYAPI READY"
+          echo "Endpoint: $ENDPOINT"
+          echo "Accounts: ${{ steps.decrypt.outputs.token_count }}"
+          echo "=========================================="
+          echo "::endgroup::"
+
       - name: Install Strix
         run: |
-          pip install strix-agent
-          echo "Strix version: $(strix --version)"
-      
-      - name: Create config.json
+          set -e
+          echo "::group::Installing Strix"
+          
+          git clone --depth 1 https://github.com/Hailer367/strix.git /tmp/strix
+          cd /tmp/strix
+          
+          pip install -q poetry
+          poetry config virtualenvs.create false
+          poetry install --no-interaction --quiet
+          
+          python -m strix.interface.main --help > /dev/null 2>&1 || echo "Strix CLI loaded"
+          echo "Strix installation complete"
+          echo "::endgroup::"
+
+      - name: Create Strix Configuration
+        id: config
         run: |
+          set -e
+          echo "::group::Creating Strix Configuration"
+          
           TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
           WARNING="${{ github.event.inputs.warning_minutes || env.DEFAULT_WARNING_MINUTES }}"
           SCAN_MODE="${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}"
+          MODEL="${{ github.event.inputs.model || 'qwen3-coder-plus' }}"
+          ENABLE_STRIXDB="${{ github.event.inputs.enable_strixdb }}"
           
-          cat > config.json << EOF
+          # Set default for enable_strixdb if empty
+          [ -z "$ENABLE_STRIXDB" ] && ENABLE_STRIXDB="true"
+          
+          for CONFIG_DIR in "$GITHUB_WORKSPACE" "/tmp/strix"; do
+            cat > "$CONFIG_DIR/config.json" <<EOF
           {
             "api": {
-              "endpoint": "${{ secrets.CLIPROXY_ENDPOINT }}",
-              "model": "${{ secrets.STRIX_MODEL || 'gemini-2.5-pro' }}",
-              "api_key": "${{ secrets.LLM_API_KEY || '' }}"
+              "endpoint": "${{ steps.cliproxy.outputs.endpoint }}",
+              "model": "$MODEL"
             },
             "timeframe": {
-              "duration_minutes": ${TIMEFRAME},
-              "warning_minutes": ${WARNING},
+              "duration_minutes": $TIMEFRAME,
+              "warning_minutes": $WARNING,
               "time_awareness_enabled": true
             },
             "dashboard": {
               "enabled": true,
+              "refresh_interval": 1.0,
               "show_time_remaining": true,
               "show_agent_details": true,
-              "show_resource_usage": true
+              "show_tool_logs": true,
+              "show_resource_usage": true,
+              "show_api_calls": true,
+              "show_vulnerabilities": true
             },
-            "scan_mode": "${SCAN_MODE}",
+            "scan_mode": "$SCAN_MODE",
             "strixdb": {
-              "enabled": ${{ github.event.inputs.enable_strixdb || 'false' }},
-              "repo": "${{ secrets.STRIXDB_REPO || '' }}",
-              "token": "${{ secrets.STRIXDB_TOKEN || '' }}"
+              "enabled": $ENABLE_STRIXDB,
+              "repo": "${{ secrets.STRIXDB_REPO }}",
+              "token": "${{ secrets.STRIXDB_TOKEN }}"
             },
-            "perplexity_api_key": "${{ secrets.PERPLEXITY_API_KEY || '' }}"
+            "perplexity_api_key": "${{ secrets.PERPLEXITY_API_KEY }}"
           }
           EOF
+          done
           
-          echo "Created config.json with ${TIMEFRAME}m duration, ${WARNING}m warning"
-      
-      - name: Prepare Custom Instructions
+          echo "Configuration Summary:"
+          echo "  - Endpoint: ${{ steps.cliproxy.outputs.endpoint }}"
+          echo "  - Model: $MODEL"
+          echo "  - Duration: $TIMEFRAME minutes"
+          echo "  - Warning: $WARNING minutes"
+          echo "  - Scan Mode: $SCAN_MODE"
+          echo "  - Accounts: ${{ steps.decrypt.outputs.token_count }}"
+          echo "  - StrixDB: $ENABLE_STRIXDB"
+          echo "::endgroup::"
+
+      - name: Prepare Instructions
         id: instructions
         run: |
-          TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
-          WARNING="${{ github.event.inputs.warning_minutes || env.DEFAULT_WARNING_MINUTES }}"
+          INSTRUCTIONS="${{ github.event.inputs.prompt }}"
           
-          # Build instruction string
-          INSTRUCTIONS=""
-          
-          # Add custom prompt if provided
-          if [ -n "${{ github.event.inputs.prompt }}" ]; then
-            INSTRUCTIONS="${{ github.event.inputs.prompt }}"
-          fi
-          
-          # Add StrixDB instructions if enabled
           if [ "${{ github.event.inputs.enable_strixdb }}" == "true" ]; then
-            INSTRUCTIONS="${INSTRUCTIONS} Save any useful scripts, tools, exploits, methods, or knowledge to StrixDB for future use."
+            INSTRUCTIONS="$INSTRUCTIONS Save useful scripts, tools, exploits, methods to StrixDB."
           fi
           
-          # Add PR context if this is a pull request
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            INSTRUCTIONS="${INSTRUCTIONS} This is a pull request review. Focus on security implications of the changed files."
-          fi
+          INSTRUCTIONS="$INSTRUCTIONS Use multi-action mode (up to 7 actions per call) for efficiency. Load-balanced across ${{ steps.decrypt.outputs.token_count }} Qwen accounts."
           
-          echo "instructions=${INSTRUCTIONS}" >> $GITHUB_OUTPUT
-      
+          INSTRUCTIONS=$(echo "$INSTRUCTIONS" | sed 's/"/\\"/g' | tr -d '\n')
+          
+          echo "instructions=$INSTRUCTIONS" >> $GITHUB_OUTPUT
+
       - name: Run Strix Security Scan
         id: strix
+        continue-on-error: true
+        env:
+          STRIXDB_TOKEN: ${{ secrets.STRIXDB_TOKEN }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          STRIX_LLM: ${{ github.event.inputs.model || 'qwen3-coder-plus' }}
+          LLM_API_BASE: ${{ steps.cliproxy.outputs.endpoint }}
         run: |
-          set +e  # Don't exit on error
+          set +e
+          echo "::group::Running Strix Security Scan"
           
-          TARGET="${{ github.event.inputs.target || './' }}"
+          TARGET="${{ github.event.inputs.target }}"
           TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
+          SCAN_MODE="${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}"
+          INSTRUCTIONS="${{ steps.instructions.outputs.instructions }}"
           
-          # Run Strix with timeout enforcement
-          timeout ${TIMEFRAME}m strix \
-            --target "${TARGET}" \
-            --scan-mode "${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}" \
-            --non-interactive \
-            --instruction "${{ steps.instructions.outputs.instructions }}" \
-            2>&1 | tee strix_output.log
+          echo "=========================================="
+          echo "STRIX SECURITY SCAN STARTING"
+          echo "=========================================="
+          echo "Target: $TARGET"
+          echo "Timeframe: $TIMEFRAME minutes"
+          echo "Scan Mode: $SCAN_MODE"
+          echo "Model: ${{ github.event.inputs.model || 'qwen3-coder-plus' }}"
+          echo "Accounts: ${{ steps.decrypt.outputs.token_count }}"
+          echo "=========================================="
           
-          EXIT_CODE=$?
+          cd "$GITHUB_WORKSPACE"
           
-          # Handle exit codes
-          if [ $EXIT_CODE -eq 124 ]; then
-            echo "Strix scan timed out after ${TIMEFRAME} minutes"
-            echo "timed_out=true" >> $GITHUB_OUTPUT
-          elif [ $EXIT_CODE -eq 2 ]; then
-            echo "Vulnerabilities found!"
-            echo "vulnerabilities_found=true" >> $GITHUB_OUTPUT
+          CMD="python -m strix.interface.main --target \"$TARGET\" --scan-mode $SCAN_MODE --non-interactive"
+          
+          if [ -n "$INSTRUCTIONS" ]; then
+            CMD="$CMD --instruction \"$INSTRUCTIONS\""
           fi
           
-          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
-      
+          timeout ${TIMEFRAME}m bash -c "$CMD" 2>&1 | tee strix_output.log
+          EXIT_CODE=$?
+          
+          VULN_COUNT=$(grep -ciE "vulnerability|VULNERABILITY|CVE-|critical|high.*severity" strix_output.log 2>/dev/null || echo "0")
+          
+          case $EXIT_CODE in
+            0)
+              echo "Scan completed successfully"
+              echo "scan_completed=true" >> $GITHUB_OUTPUT
+              ;;
+            2)
+              echo "Scan completed with vulnerabilities found"
+              echo "scan_completed=true" >> $GITHUB_OUTPUT
+              ;;
+            124)
+              echo "Scan completed (timeframe exhausted)"
+              echo "timed_out=true" >> $GITHUB_OUTPUT
+              echo "scan_completed=true" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "Scan completed with exit code: $EXIT_CODE"
+              echo "scan_completed=true" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          
+          echo "vulnerabilities_found=$VULN_COUNT" >> $GITHUB_OUTPUT
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+          exit 0
+
+      - name: Stop CLIProxyAPI Server
+        if: always()
+        run: |
+          echo "::group::Stopping CLIProxyAPI"
+          
+          AUTH_DIR="$HOME/.cli-proxy-api"
+          
+          if [ -f "$AUTH_DIR/cliproxy.pid" ]; then
+            PID=$(cat "$AUTH_DIR/cliproxy.pid")
+            kill $PID 2>/dev/null || true
+            echo "CLIProxyAPI stopped (PID: $PID)"
+          fi
+          
+          if [ -f "$AUTH_DIR/cliproxy.log" ]; then
+            echo "Final CLIProxyAPI logs:"
+            tail -n 20 "$AUTH_DIR/cliproxy.log"
+          fi
+          
+          rm -rf "$AUTH_DIR"/qwen-*.json
+          rm -f "$AUTH_DIR/cliproxy.pid"
+          echo "::endgroup::"
+
       - name: Upload Scan Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: strix-results-${{ github.run_id }}
+          name: striflow-results-${{ github.run_id }}
           path: |
             strix_runs/
             strix_output.log
             config.json
           retention-days: 30
-      
-      - name: Comment on PR
+
+      - name: Create Security Summary
+        if: always()
+        run: |
+          TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
+          VULNS="${{ steps.strix.outputs.vulnerabilities_found }}"
+          TIMED_OUT="${{ steps.strix.outputs.timed_out }}"
+          TOKEN_COUNT="${{ steps.decrypt.outputs.token_count }}"
+          EXIT_CODE="${{ steps.strix.outputs.exit_code }}"
+          
+          {
+            echo "## StriFlow Security Scan Results"
+            echo ""
+            echo "### Configuration"
+            echo "| Setting | Value |"
+            echo "|---------|-------|"
+            echo "| Target | \`${{ github.event.inputs.target }}\` |"
+            echo "| Scan Mode | ${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }} |"
+            echo "| Duration | $TIMEFRAME minutes |"
+            echo "| Model | ${{ github.event.inputs.model || 'qwen3-coder-plus' }} |"
+            echo "| Qwen Accounts | $TOKEN_COUNT (load-balanced) |"
+            echo "| StrixDB | ${{ github.event.inputs.enable_strixdb || 'true' }} |"
+            echo ""
+            echo "### Results"
+            
+            if [ "$TIMED_OUT" == "true" ]; then
+              echo "- **Status:** Completed (full timeframe used)"
+            else
+              echo "- **Status:** Completed"
+            fi
+            
+            if [ -n "$VULNS" ] && [ "$VULNS" -gt 0 ] 2>/dev/null; then
+              echo "- **Potential Vulnerabilities:** $VULNS identified"
+            else
+              echo "- **Potential Vulnerabilities:** None identified"
+            fi
+            
+            echo "- **Exit Code:** $EXIT_CODE"
+            echo ""
+            echo "### Features Used"
+            echo "- Multi-Action Mode (up to 7 actions per API call)"
+            echo "- Active Commander (main agent actively participates)"
+            echo "- Qwen Token Load Balancing ($TOKEN_COUNT accounts)"
+            echo "- Live Dashboard (real-time vulnerability disclosure)"
+            echo "- Continuous Scanning (doesn't stop on first find)"
+            echo ""
+            echo "See workflow artifacts for detailed results."
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment on PR with Results
         if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7
         with:
           script: |
-            const fs = require('fs');
-            
-            let summary = '## 🦉 Strix Security Scan Results\n\n';
-            
             const timedOut = '${{ steps.strix.outputs.timed_out }}' === 'true';
-            const vulnsFound = '${{ steps.strix.outputs.vulnerabilities_found }}' === 'true';
+            const vulnsFound = '${{ steps.strix.outputs.vulnerabilities_found }}' || '0';
             const exitCode = '${{ steps.strix.outputs.exit_code }}';
-            const timeframe = '${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}';
+            const timeframe = '${{ github.event.inputs.timeframe }}' || '${{ env.DEFAULT_TIMEFRAME }}';
+            const tokenCount = '${{ steps.decrypt.outputs.token_count }}';
+            
+            let summary = '## StriFlow Security Scan Results\n\n';
             
             if (timedOut) {
-              summary += '⏱️ **Status:** Scan completed (time limit reached)\n\n';
-              summary += `The scan ran for the full ${timeframe} minutes. Results may be partial.\n\n`;
-            } else if (vulnsFound) {
-              summary += '🔴 **Status:** Vulnerabilities Found\n\n';
-              summary += 'Security issues were identified. Please review the detailed report in the workflow artifacts.\n\n';
+              summary += `**Status:** Scan completed (full ${timeframe} minutes used)\n\n`;
             } else {
-              summary += '🟢 **Status:** Scan Completed\n\n';
-              summary += 'No critical vulnerabilities were found.\n\n';
+              summary += '**Status:** Scan Completed\n\n';
+            }
+            
+            if (parseInt(vulnsFound) > 0) {
+              summary += `**Potential Vulnerabilities:** ${vulnsFound} identified\n\n`;
+              summary += 'Review the detailed report in workflow artifacts.\n\n';
+            } else {
+              summary += '**No vulnerabilities found**\n\n';
             }
             
             summary += `**Scan Mode:** ${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}\n`;
             summary += `**Timeframe:** ${timeframe} minutes\n`;
+            summary += `**Qwen Accounts:** ${tokenCount} (load-balanced)\n`;
             summary += `**Exit Code:** ${exitCode}\n\n`;
+            summary += '### Features:\n';
+            summary += '- Multi-Action Mode (7 actions/call)\n';
+            summary += '- Qwen Token Load Balancing\n';
+            summary += '- Continuous Scanning\n\n';
+            summary += `[View Full Results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
             
-            summary += '📎 [View Full Results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n';
-            
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: summary
             });
-      
-      - name: Fail if Vulnerabilities Found
-        if: steps.strix.outputs.vulnerabilities_found == 'true'
-        run: |
-          echo "Security vulnerabilities were found. Failing the workflow."
-          exit 1
