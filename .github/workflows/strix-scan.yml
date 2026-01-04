@@ -1,4 +1,4 @@
-name: StriFlow - Integrated Strix Security Scan
+name: StriFlow Integrated Strix Security Scan
 
 on:
   workflow_dispatch:
@@ -93,7 +93,7 @@ jobs:
       pull-requests: write
 
     steps:
-      # ---------- 1.  compute timeout ----------
+      # ---------- 1.  compute timeout (fixes the '+' error) ----------
       - name: Compute timeout
         id: vars
         run: |
@@ -316,7 +316,7 @@ jobs:
       # ---------- 11.  run scan ----------
       - name: Run Strix Security Scan
         id: strix
-        timeout-minutes: ${{ steps.vars.outputs.timeout }}
+        timeout-minutes: ${{ steps.vars.outputs.timeout }}   # safe reference
         continue-on-error: true
         env:
           STRIXDB_TOKEN: ${{ secrets.STRIXDB_TOKEN }}
