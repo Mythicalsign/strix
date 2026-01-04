@@ -87,6 +87,7 @@ jobs:
   striflow-scan:
     name: StriFlow Security Scan
     runs-on: ubuntu-latest
+    # FIXED: Removed invalid timeout-minutes expression from job level
     permissions:
       contents: read
       security-events: write
@@ -102,8 +103,7 @@ jobs:
             echo "Invalid timeframe: $TF" >&2
             exit 1
           fi
-          TIMEOUT=$(( TF + 30 ))
-          echo "timeout=$TIMEOUT" >> "$GITHUB_OUTPUT"
+          echo "timeout=$(( TF + 30 ))" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -308,7 +308,7 @@ EOF
 
       - name: Run Strix Security Scan
         id: strix
-        timeout-minutes: ${{ steps.vars.outputs.timeout }}
+        timeout-minutes: ${{ steps.vars.outputs.timeout }}  # ✅ CORRECT: uses step output
         continue-on-error: true
         env:
           STRIXDB_TOKEN: ${{ secrets.STRIXDB_TOKEN }}
