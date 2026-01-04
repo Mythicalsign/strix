@@ -395,7 +395,7 @@ EOF
             config.json
           retention-days: 30
 
-            - name: Create Security Summary
+      - name: Create Security Summary
         if: always()
         run: |
           set -euo pipefail
@@ -404,7 +404,6 @@ EOF
           TIMED_OUT="${{ steps.strix.outputs.timed_out }}"
           TOKEN_COUNT="${{ steps.decrypt.outputs.token_count }}"
           EXIT_CODE="${{ steps.strix.outputs.exit_code }}"
-
           cat <<EOF >> "$GITHUB_STEP_SUMMARY"
 ## StriFlow Security Scan Results
 
