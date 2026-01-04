@@ -93,21 +93,19 @@ jobs:
       pull-requests: write
 
     steps:
-      # ---------- 1.  compute timeout (fixes the '+' error) ----------
+      # ---------- 1.  compute timeout (NO quotes) ----------
       - name: Compute timeout
         id: vars
         run: |
           set -euo pipefail
           TF=${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}
-          echo "timeout=$(( TF + 30 ))" >> "$GITHUB_OUTPUT"
+          echo $(( TF + 30 )) >> "$GITHUB_OUTPUT"
 
-      # ---------- 2.  check out repo ----------
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ---------- 3.  install runtimes ----------
       - name: Setup Go Environment
         uses: actions/setup-go@v5
         with:
@@ -118,7 +116,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      # ---------- 4.  decrypt tokens ----------
       - name: Decrypt Qwen Tokens
         id: decrypt
         run: |
@@ -149,7 +146,6 @@ jobs:
           rm -f qwen-tokens.enc qwen-tokens.tar.gz
           echo "::endgroup::"
 
-      # ---------- 5.  install CLIProxyAPI ----------
       - name: Install CLIProxyAPI
         run: |
           set -euo pipefail
@@ -161,7 +157,6 @@ jobs:
           cli-proxy-api --version || echo "CLIProxyAPI installed"
           echo "::endgroup::"
 
-      # ---------- 6.  configure ----------
       - name: Configure CLIProxyAPI
         run: |
           set -euo pipefail
@@ -193,7 +188,6 @@ jobs:
           echo "Configuration created at $AUTH_DIR/config.yaml"
           echo "::endgroup::"
 
-      # ---------- 7.  start proxy ----------
       - name: Start CLIProxyAPI Server
         id: cliproxy
         run: |
@@ -228,11 +222,11 @@ jobs:
           echo "=========================================="
           echo "::endgroup::"
 
-      # ---------- 7b.  tell LiteLLM which provider ----------
-      - name: Export LiteLLM provider
-        run: echo "CUSTOM_LLM_PROVIDER=openai" >> "$GITHUB_ENV"
+      - name: Export LiteLLM provider for Strix
+        run: |
+          echo "CUSTOM_LLM_PROVIDER=openai" >> "$GITHUB_ENV"
+          echo "LITELLM_CUSTOM_API_BASE=${{ steps.cliproxy.outputs.endpoint }}" >> "$GITHUB_ENV"
 
-      # ---------- 8.  install Strix ----------
       - name: Install Strix
         run: |
           set -euo pipefail
@@ -246,7 +240,6 @@ jobs:
           echo "Strix installation complete"
           echo "::endgroup::"
 
-      # ---------- 9.  create Strix config ----------
       - name: Create Strix Configuration
         id: config
         run: |
@@ -300,7 +293,6 @@ jobs:
           echo "  - StrixDB: $ENABLE_STRIXDB"
           echo "::endgroup::"
 
-      # ---------- 10.  build instructions ----------
       - name: Prepare Instructions
         id: instructions
         run: |
@@ -313,10 +305,9 @@ jobs:
           INSTRUCTIONS=$(echo "$INSTRUCTIONS" | sed 's/"/\\"/g' | tr -d '\n')
           echo "instructions=$INSTRUCTIONS" >> "$GITHUB_OUTPUT"
 
-      # ---------- 11.  run scan ----------
       - name: Run Strix Security Scan
         id: strix
-        timeout-minutes: ${{ steps.vars.outputs.timeout }}   # safe reference
+        timeout-minutes: ${{ steps.vars.outputs.timeout }}   # integer, no quotes
         continue-on-error: true
         env:
           STRIXDB_TOKEN: ${{ secrets.STRIXDB_TOKEN }}
@@ -347,6 +338,7 @@ jobs:
           fi
           timeout ${TIMEFRAME}m bash -c "$CMD" 2>&1 | tee strix_output.log
           EXIT_CODE=${PIPESTATUS[0]}
+          EXIT_CODE=${EXIT_CODE:-1}                       # never empty
           VULN_COUNT=$(grep -ciE "vulnerability|VULNERABILITY|CVE-|critical|high.*severity" strix_output.log 2>/dev/null || echo "0")
           case $EXIT_CODE in
             0)
@@ -372,7 +364,6 @@ jobs:
           echo "::endgroup::"
           exit 0
 
-      # ---------- 12.  stop proxy ----------
       - name: Stop CLIProxyAPI Server
         if: always()
         run: |
@@ -392,7 +383,6 @@ jobs:
           rm -f "$AUTH_DIR/cliproxy.pid"
           echo "::endgroup::"
 
-      # ---------- 13.  upload artifacts ----------
       - name: Upload Scan Results
         uses: actions/upload-artifact@v4
         if: always()
@@ -404,7 +394,6 @@ jobs:
             config.json
           retention-days: 30
 
-      # ---------- 14.  job summary ----------
       - name: Create Security Summary
         if: always()
         run: |
@@ -450,7 +439,6 @@ jobs:
             echo "See workflow artifacts for detailed results."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ---------- 15.  PR comment ----------
       - name: Comment on PR with Results
         if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7
