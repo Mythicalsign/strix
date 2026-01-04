@@ -90,12 +90,12 @@ jobs:
     runs-on: ubuntu-latest
     # Allow full timeframe + setup time (30 min buffer)
     timeout-minutes: ${{ fromJSON(github.event.inputs.timeframe || '60') + 30 }}
-    
+
     permissions:
       contents: read
       security-events: write
       pull-requests: write
-    
+
     steps:
       # ==========================================
       # STEP 1: Checkout Repository
@@ -104,7 +104,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       # ==========================================
       # STEP 2: Set up Build Environment
       # ==========================================
@@ -112,12 +112,12 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-      
+
       - name: Set up Python (for Strix)
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
+
       # ==========================================
       # STEP 3: Decrypt QWEN_TOKENS
       # ==========================================
@@ -217,33 +217,34 @@ jobs:
           # Expand home directory
           AUTH_DIR="$HOME/.cli-proxy-api"
           
-          # Create configuration file (using EOF without quotes to allow variable expansion)
+          # Create configuration file
           cat > "$AUTH_DIR/config.yaml" << 'CONFIGEOF'
-          server:
-            port: __CLIPROXY_PORT__
-            host: "0.0.0.0"
-          providers:
-            qwen:
-              enabled: true
-              load-balance: true
-              round-robin: true
-              health-check: true
-          auth-dir: "__AUTH_DIR__"
-          quota-exceeded:
-            switch-project: true
-            switch-preview-model: true
-          request-retry: 3
-          timeout: "300s"
-          logging:
-            level: "info"
-            file: "__AUTH_DIR__/cliproxy.log"
-          cors:
-            enabled: true
-            origins: ["*"]
-          CONFIGEOF
+server:
+  port: CLIPROXY_PORT_PLACEHOLDER
+  host: "0.0.0.0"
+providers:
+  qwen:
+    enabled: true
+    load-balance: true
+    round-robin: true
+    health-check: true
+auth-dir: "AUTH_DIR_PLACEHOLDER"
+quota-exceeded:
+  switch-project: true
+  switch-preview-model: true
+request-retry: 3
+timeout: "300s"
+logging:
+  level: "info"
+  file: "AUTH_DIR_PLACEHOLDER/cliproxy.log"
+cors:
+  enabled: true
+  origins: ["*"]
+CONFIGEOF
           
-          # Replace placeholders with actual values and remove leading spaces
-          sed -i "s|__CLIPROXY_PORT__|${CLIPROXY_PORT}|g; s|__AUTH_DIR__|${AUTH_DIR}|g; s/^          //g" "$AUTH_DIR/config.yaml"
+          # Replace placeholders with actual values
+          sed -i "s|CLIPROXY_PORT_PLACEHOLDER|${CLIPROXY_PORT}|g" "$AUTH_DIR/config.yaml"
+          sed -i "s|AUTH_DIR_PLACEHOLDER|${AUTH_DIR}|g" "$AUTH_DIR/config.yaml"
           
           echo "Configuration created at $AUTH_DIR/config.yaml"
           cat "$AUTH_DIR/config.yaml"
@@ -356,37 +357,35 @@ jobs:
           # Create config in both the checkout directory AND /tmp/strix for Strix to find it
           for CONFIG_DIR in "$GITHUB_WORKSPACE" "/tmp/strix"; do
             cat > "$CONFIG_DIR/config.json" << JSONEOF
-          {
-            "api": {
-              "endpoint": "${CLIPROXY_ENDPOINT}",
-              "model": "${MODEL}"
-            },
-            "timeframe": {
-              "duration_minutes": ${TIMEFRAME},
-              "warning_minutes": ${WARNING},
-              "time_awareness_enabled": true
-            },
-            "dashboard": {
-              "enabled": true,
-              "refresh_interval": 1.0,
-              "show_time_remaining": true,
-              "show_agent_details": true,
-              "show_tool_logs": true,
-              "show_resource_usage": true,
-              "show_api_calls": true,
-              "show_vulnerabilities": true
-            },
-            "scan_mode": "${SCAN_MODE}",
-            "strixdb": {
-              "enabled": ${ENABLE_STRIXDB},
-              "repo": "${STRIXDB_REPO:-}",
-              "token": "${STRIXDB_TOKEN:-}"
-            },
-            "perplexity_api_key": "${PERPLEXITY_API_KEY:-}"
-          }
-          JSONEOF
-            # Remove leading spaces from the JSON file
-            sed -i 's/^          //g' "$CONFIG_DIR/config.json"
+{
+  "api": {
+    "endpoint": "${CLIPROXY_ENDPOINT}",
+    "model": "${MODEL}"
+  },
+  "timeframe": {
+    "duration_minutes": ${TIMEFRAME},
+    "warning_minutes": ${WARNING},
+    "time_awareness_enabled": true
+  },
+  "dashboard": {
+    "enabled": true,
+    "refresh_interval": 1.0,
+    "show_time_remaining": true,
+    "show_agent_details": true,
+    "show_tool_logs": true,
+    "show_resource_usage": true,
+    "show_api_calls": true,
+    "show_vulnerabilities": true
+  },
+  "scan_mode": "${SCAN_MODE}",
+  "strixdb": {
+    "enabled": ${ENABLE_STRIXDB},
+    "repo": "${STRIXDB_REPO:-}",
+    "token": "${STRIXDB_TOKEN:-}"
+  },
+  "perplexity_api_key": "${PERPLEXITY_API_KEY:-}"
+}
+JSONEOF
             echo "Created config.json at $CONFIG_DIR"
           done
           
@@ -435,16 +434,13 @@ jobs:
       # ==========================================
       - name: Run Strix Security Scan (Continuous Mode)
         id: strix
+        continue-on-error: true
         env:
           STRIXDB_TOKEN: ${{ secrets.STRIXDB_TOKEN }}
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
-          # Set environment variables as fallback for Strix
           STRIX_LLM: ${{ github.event.inputs.model || 'qwen3-coder-plus' }}
           LLM_API_BASE: ${{ steps.cliproxy.outputs.endpoint }}
         run: |
-          # Don't exit on error - we want to capture all results
-          set +e
-          
           TARGET="${{ github.event.inputs.target || './' }}"
           TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
           SCAN_MODE="${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}"
@@ -489,8 +485,7 @@ jobs:
           echo "Running: $STRIX_CMD"
           echo ""
           
-          # Run Strix with timeout - DOES NOT FAIL ON VULNERABILITY FOUND
-          # The AI will continue scanning until the timeframe is exhausted
+          # Run Strix with timeout
           timeout ${TIMEFRAME}m bash -c "$STRIX_CMD" 2>&1 | tee strix_output.log
           
           EXIT_CODE=$?
@@ -513,7 +508,6 @@ jobs:
             echo "=========================================="
             echo "scan_completed=true" >> $GITHUB_OUTPUT
           elif [ $EXIT_CODE -eq 2 ]; then
-            # Exit code 2 means vulnerabilities were found (expected behavior)
             echo ""
             echo "=========================================="
             echo "SCAN COMPLETED (Vulnerabilities Found)"
@@ -530,8 +524,6 @@ jobs:
           echo "vulnerabilities_found=${VULN_COUNT}" >> $GITHUB_OUTPUT
           echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
           
-          # Always exit 0 - we report vulnerabilities but don't fail the workflow
-          # This allows continuous scanning to work properly
           exit 0
       
       # ==========================================
@@ -568,7 +560,7 @@ jobs:
       # ==========================================
       # STEP 11: Upload Results
       # ==========================================
-      - name: Upload Scan Results
+      -  - name: Upload Scan Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -578,7 +570,7 @@ jobs:
             strix_output.log
             config.json
           retention-days: 30
-      
+
       # ==========================================
       # STEP 12: Create Summary
       # ==========================================
