@@ -164,7 +164,7 @@ jobs:
           set -e
           echo "::group::Installing CLIProxyAPI"
 
-          git clone --depth 1 https://github.com/router-for-me/CLIProxyAPI.git /tmp/CLIProxyAPI
+          git clone --depth 1 https://github.com/router-for-me/CLIProxyAPI.git  /tmp/CLIProxyAPI
           cd /tmp/CLIProxyAPI
           go build -o cli-proxy-api ./cmd/server
           sudo mv cli-proxy-api /usr/local/bin/
@@ -255,7 +255,7 @@ jobs:
           set -e
           echo "::group::Installing Strix"
 
-          git clone --depth 1 https://github.com/Hailer367/strix.git /tmp/strix
+          git clone --depth 1 https://github.com/Hailer367/strix.git  /tmp/strix
           cd /tmp/strix
 
           pip install -q poetry
@@ -343,6 +343,7 @@ jobs:
       # ---------- 11.  run scan ----------
       - name: Run Strix Security Scan
         id: strix
+        timeout-minutes: ${{ fromJSON(github.event.inputs.timeframe || '60') + 30 }}
         continue-on-error: true
         env:
           STRIXDB_TOKEN: ${{ secrets.STRIXDB_TOKEN }}
@@ -503,20 +504,17 @@ jobs:
             const tokenCount = '${{ steps.decrypt.outputs.token_count }}';
 
             let summary = '## StriFlow Security Scan Results\n\n';
-
             if (timedOut) {
               summary += `**Status:** Scan completed (full ${timeframe} minutes used)\n\n`;
             } else {
               summary += '**Status:** Scan Completed\n\n';
             }
-
             if (parseInt(vulnsFound) > 0) {
               summary += `**Potential Vulnerabilities:** ${vulnsFound} identified\n\n`;
               summary += 'Review the detailed report in workflow artifacts.\n\n';
             } else {
               summary += '**No vulnerabilities found**\n\n';
             }
-
             summary += `**Scan Mode:** ${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}\n`;
             summary += `**Timeframe:** ${timeframe} minutes\n`;
             summary += `**Qwen Accounts:** ${tokenCount} (load-balanced)\n`;
@@ -533,6 +531,3 @@ jobs:
               repo: context.repo.repo,
               body: summary
             });
-
-    # use the computed timeout (fixes the '+' parsing error)
-    timeout-minutes: ${{ fromJSON(steps.vars.outputs.timeout) }}
