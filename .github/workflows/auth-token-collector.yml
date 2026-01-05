@@ -352,10 +352,60 @@ jobs:
           
           echo "Encrypted file: $(ls -lh qwen-tokens.enc)"
           
-          # Base64 encode for storage as GitHub secret
-          base64 -w 0 qwen-tokens.enc > "$HOME/qwen-tokens.b64"
+          # Base64 encode for storage as GitHub secret (one line, no wrapping)
+          BASE64_SECRET=$(base64 -w 0 qwen-tokens.enc)
           
-          echo "Base64 encoded file: $(ls -lh "$HOME/qwen-tokens.b64")"
+          # Create output directory for the artifact
+          OUTPUT_DIR="$HOME/qwen-token-output"
+          mkdir -p "$OUTPUT_DIR"
+          
+          # Create JSON file with the secret and metadata
+          cat > "$OUTPUT_DIR/qwen_tokens_secret.json" << JSONEOF
+          {
+            "secret_name": "QWEN_TOKENS",
+            "secret_value": "$BASE64_SECRET",
+            "token_count": $TOKEN_COUNT,
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "expires_in_days": 7,
+            "instructions": "Copy the 'secret_value' field content and paste it as the value for QWEN_TOKENS repository secret."
+          }
+          JSONEOF
+          
+          # Also create a plain text file with just the secret for easy copy-paste
+          echo "$BASE64_SECRET" > "$OUTPUT_DIR/QWEN_TOKENS_SECRET.txt"
+          
+          # Create a README for the artifact
+          cat > "$OUTPUT_DIR/README.md" << 'READMEEOF'
+          # Qwen Tokens Secret
+          
+          This artifact contains your encrypted Qwen tokens.
+          
+          ## Files
+          
+          - `QWEN_TOKENS_SECRET.txt` - Contains ONLY the one-line base64 secret (easy copy-paste)
+          - `qwen_tokens_secret.json` - Contains the secret with metadata
+          
+          ## How to Use
+          
+          1. Open `QWEN_TOKENS_SECRET.txt`
+          2. Copy the ENTIRE content (it's one long line)
+          3. Go to your repository → Settings → Secrets and variables → Actions
+          4. Click "New repository secret"
+          5. Name: `QWEN_TOKENS`
+          6. Value: Paste the copied content
+          7. Click "Add secret"
+          
+          ## Important
+          
+          - Remember your encryption password - you'll need it for strix-scan.yml
+          - This artifact expires in 7 days
+          - Never share these tokens
+          READMEEOF
+          
+          echo "Created output files:"
+          ls -la "$OUTPUT_DIR"
+          echo ""
+          echo "Secret length: ${#BASE64_SECRET} characters"
           
           # Cleanup temp files
           rm -rf "$TEMP_DIR"
@@ -367,7 +417,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qwen-encrypted-tokens
-          path: ~/qwen-tokens.b64
+          path: ~/qwen-token-output/
           retention-days: 7
 
       # ---------- 12. Show instructions ----------
@@ -387,20 +437,24 @@ jobs:
           ### 📦 Next Steps
           
           1. **Download the artifact** `qwen-encrypted-tokens` from this workflow run
+             - It's a ZIP file containing:
+               - `QWEN_TOKENS_SECRET.txt` - One-line secret for easy copy-paste
+               - `qwen_tokens_secret.json` - Secret with metadata
+               - `README.md` - Detailed instructions
           
-          2. **Get the base64 content** from the downloaded `qwen-tokens.b64` file
+          2. **Extract the ZIP** and open `QWEN_TOKENS_SECRET.txt`
           
           3. **Create a repository secret** named `QWEN_TOKENS`:
              - Go to Settings → Secrets and variables → Actions
              - Click "New repository secret"
              - Name: `QWEN_TOKENS`
-             - Value: Paste the entire content of `qwen-tokens.b64`
+             - Value: Copy and paste the entire content of `QWEN_TOKENS_SECRET.txt`
           
           4. **Run strix-scan.yml** with the same encryption password
           
           ### 🔐 Security Notes
           
-          - The artifact is encrypted with AES-256-CBC
+          - The tokens are encrypted with AES-256-CBC
           - Keep your encryption password safe - you'll need it for strix-scan.yml
           - The artifact expires in 7 days
           - Never share your tokens or encryption password
@@ -415,6 +469,6 @@ jobs:
         if: always()
         run: |
           rm -rf "$AUTH_DIR"/qwen-*.json 2>/dev/null || true
-          rm -f "$HOME/qwen-tokens.b64" 2>/dev/null || true
+          rm -rf "$HOME/qwen-token-output" 2>/dev/null || true
           rm -f /tmp/cliproxy-*.log /tmp/expect-*.log /tmp/auth-*.exp 2>/dev/null || true
           echo "Sensitive files cleaned up"
