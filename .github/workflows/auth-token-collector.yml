@@ -17,132 +17,336 @@ on:
 jobs:
   collect-tokens:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+
     steps:
-      # ---------- 1.  install CLIProxyAPI ----------
+      # ---------- 1. Checkout repository ----------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------- 2. Setup Go for building CLIProxyAPI ----------
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      # ---------- 3. Install CLIProxyAPI ----------
       - name: Install CLIProxyAPI
         run: |
-          git clone https://github.com/luispater/CLIProxyAPI.git
-          cd CLIProxyAPI
-          go build -o cli-proxy-api ./cmd/server   # ← build it
-          sudo cp cli-proxy-api /usr/local/bin/cliproxyapi
-          cd ..
-          rm -rf CLIProxyAPI
+          set -euo pipefail
+          echo "::group::Installing CLIProxyAPI"
+          git clone --depth 1 https://github.com/router-for-me/CLIProxyAPI.git /tmp/CLIProxyAPI
+          cd /tmp/CLIProxyAPI
+          go build -o cli-proxy-api ./cmd/server
+          sudo mv cli-proxy-api /usr/local/bin/cliproxyapi
+          cd /
+          rm -rf /tmp/CLIProxyAPI
           cliproxyapi --help
+          echo "::endgroup::"
 
-      # ---------- 2.  create per-account folders ----------
+      # ---------- 4. Validate aliases secret ----------
+      - name: Validate QWEN_ALIASES secret
+        env:
+          QWEN_ALIASES: ${{ secrets.QWEN_ALIASES }}
+        run: |
+          set -euo pipefail
+          if [ -z "$QWEN_ALIASES" ]; then
+            echo "::error::QWEN_ALIASES secret is not set!"
+            echo "Please set the QWEN_ALIASES secret with comma-separated aliases (e.g., 'john,jane,alex')"
+            exit 1
+          fi
+          
+          IFS=',' read -r -a ALIAS_ARRAY <<< "$QWEN_ALIASES"
+          NEEDED=${{ github.event.inputs.num_accounts }}
+          
+          echo "Found ${#ALIAS_ARRAY[@]} aliases in QWEN_ALIASES secret"
+          echo "Requested accounts: $NEEDED"
+          
+          if [ "${#ALIAS_ARRAY[@]}" -lt "$NEEDED" ]; then
+            echo "::error::QWEN_ALIASES contains ${#ALIAS_ARRAY[@]} aliases, but $NEEDED accounts requested!"
+            exit 1
+          fi
+          
+          echo "✅ Alias validation passed"
+
+      # ---------- 5. Create auth directory structure ----------
       - name: Create auth directory structure
         run: |
+          set -euo pipefail
           AUTH_DIR="$HOME/.cli-proxy-api"
           mkdir -p "$AUTH_DIR"
           chmod 700 "$AUTH_DIR"
-          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
-            mkdir -p "$AUTH_DIR/account-$i"
-            chmod 700 "$AUTH_DIR/account-$i"
-          done
+          echo "AUTH_DIR=$AUTH_DIR" >> "$GITHUB_ENV"
+          echo "✅ Auth directory created: $AUTH_DIR"
 
-      # ---------- 3.  create per-account config ----------
-      - name: Create config files for each account
+      # ---------- 6. Create config file ----------
+      - name: Create CLIProxyAPI config
         run: |
-          for i in $(seq 1 ${{ github.event.inputs.num_accounts }}); do
-            cat > config-account-$i.yaml <<EOF
+          set -euo pipefail
+          cat > "$AUTH_DIR/config.yaml" << 'EOF'
           port: 8317
-          auth-dir: "$HOME/.cli-proxy-api/account-$i"
+          auth-dir: "${AUTH_DIR}"
           debug: true
           logging-to-file: true
           EOF
-          done
+          # Replace the placeholder with actual path
+          sed -i "s|\${AUTH_DIR}|$AUTH_DIR|g" "$AUTH_DIR/config.yaml"
+          echo "Config file created:"
+          cat "$AUTH_DIR/config.yaml"
 
-      # ---------- 4.  authenticate sequentially ----------
+      # ---------- 7. Authenticate accounts sequentially ----------
       - name: Authenticate accounts sequentially
         env:
-          QWEN_ALIASES: ${{ secrets.QWEN_ALIASES }}   # <-- "acc1,acc2,acc3,..."
+          QWEN_ALIASES: ${{ secrets.QWEN_ALIASES }}
         run: |
-          # --- 1.  split secret into array ---
+          set -euo pipefail
+          
+          # Parse aliases
           IFS=',' read -r -a ALIAS_ARRAY <<< "$QWEN_ALIASES"
           NEEDED=${{ github.event.inputs.num_accounts }}
-          if [ "${#ALIAS_ARRAY[@]}" -lt "$NEEDED" ]; then
-            echo "❌  Secret QWEN_ALIASES contains ${#ALIAS_ARRAY[@]} aliases, but $NEEDED accounts requested"
-            exit 1
-          fi
-
-          # --- 2.  build patched CLIProxyAPI (reads QWEN_ALIAS env-var) ---
-          git clone https://github.com/YOUR_FORK/CLIProxyAPI.git   # ← your fork that uses os.Getenv("QWEN_ALIAS")
-          cd CLIProxyAPI
-          go build -o cli-proxy-api ./cmd/server
-          sudo cp cli-proxy-api /usr/local/bin/cliproxyapi
-          cd .. && rm -rf CLIProxyAPI
-
-          # --- 3.  authenticate each account ---
+          
+          echo "=========================================="
+          echo "Starting authentication for $NEEDED accounts"
+          echo "=========================================="
+          
+          COLLECTED=0
+          
           for i in $(seq 1 "$NEEDED"); do
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "📱 ACCOUNT $i / $NEEDED"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-            CONFIG="config-account-$i.yaml"
-            ACCOUNT_DIR="$HOME/.cli-proxy-api/account-$i"
-
-            # pick alias for this account (zero-based array)
-            export QWEN_ALIAS="${ALIAS_ARRAY[$((i-1))]}"
-
-            # start server (background)
-            nohup cliproxyapi -config "$CONFIG" -qwen-login > server-$i.log 2>&1 &
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📱 AUTHENTICATING ACCOUNT $i / $NEEDED"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # Get alias for this account (zero-based array)
+            CURRENT_ALIAS="${ALIAS_ARRAY[$((i-1))]}"
+            CURRENT_ALIAS=$(echo "$CURRENT_ALIAS" | xargs)  # Trim whitespace
+            
+            echo "Using alias: $CURRENT_ALIAS"
+            
+            # Create log file for this account
+            LOG_FILE="/tmp/cliproxy-$i.log"
+            
+            # Start CLIProxyAPI in background with the alias piped to stdin
+            # The tool reads the alias from stdin after OAuth completes
+            echo "$CURRENT_ALIAS" | timeout 600 cliproxyapi \
+              -config "$AUTH_DIR/config.yaml" \
+              -qwen-login \
+              -no-browser > "$LOG_FILE" 2>&1 &
             SERVER_PID=$!
-
-            # wait for OAuth URL
-            for retry in {1..30}; do
-              URL=$(grep -oP 'https://[^\s]+' server-$i.log | head -1)
-              [ -n "$URL" ] && break
+            
+            echo "Started CLIProxyAPI (PID: $SERVER_PID)"
+            
+            # Wait for OAuth URL to appear in log
+            echo "Waiting for OAuth URL..."
+            URL=""
+            for retry in {1..60}; do
+              if [ -f "$LOG_FILE" ]; then
+                URL=$(grep -oP 'https://[^\s"]+' "$LOG_FILE" 2>/dev/null | head -1 || true)
+                if [ -n "$URL" ]; then
+                  break
+                fi
+              fi
               sleep 2
             done
-            [ -z "$URL" ] && { echo "❌ No OAuth URL"; exit 1; }
-
-            echo "👉 Browser URL (auto-finishing with alias $QWEN_ALIAS):"
+            
+            if [ -z "$URL" ]; then
+              echo "::warning::No OAuth URL found for account $i"
+              echo "Log contents:"
+              cat "$LOG_FILE" 2>/dev/null || echo "(empty log)"
+              kill $SERVER_PID 2>/dev/null || true
+              continue
+            fi
+            
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════╗"
+            echo "║  🔗 AUTHENTICATION URL FOR ACCOUNT $i                        ║"
+            echo "╠══════════════════════════════════════════════════════════════╣"
+            echo "║  Open this URL in your browser and log in:                   ║"
+            echo "╚══════════════════════════════════════════════════════════════╝"
+            echo ""
             echo "   $URL"
-
-            # wait for token file
+            echo ""
+            echo "⏳ Waiting for authentication (timeout: 10 minutes)..."
+            echo "   Alias '$CURRENT_ALIAS' will be automatically used."
+            echo ""
+            
+            # Wait for token file to appear
+            TOKEN_FILE=""
             for s in {1..600}; do
-              TOKEN=$(find "$ACCOUNT_DIR" -maxdepth 1 -name 'qwen-*.json' -print -quit)
-              [ -n "$TOKEN" ] && echo "✅ Token detected: $(basename "$TOKEN")" && break
+              # Check if the process is still running
+              if ! kill -0 $SERVER_PID 2>/dev/null; then
+                echo "CLIProxyAPI process ended"
+                break
+              fi
+              
+              # Look for the token file
+              TOKEN_FILE=$(find "$AUTH_DIR" -maxdepth 1 -name "qwen-*.json" -newer "$LOG_FILE" -print -quit 2>/dev/null || true)
+              if [ -n "$TOKEN_FILE" ]; then
+                echo "✅ Token file created: $(basename "$TOKEN_FILE")"
+                COLLECTED=$((COLLECTED + 1))
+                break
+              fi
+              
+              # Show progress every 30 seconds
+              if [ $((s % 30)) -eq 0 ]; then
+                echo "   Still waiting... ($s seconds elapsed)"
+              fi
+              
               sleep 1
             done
-            [ -z "$TOKEN" ] && { echo "❌ Timeout"; exit 1; }
-
+            
+            # Clean up the process
             kill $SERVER_PID 2>/dev/null || true
-            echo "⏸️  5 s pause …"; sleep 5
+            wait $SERVER_PID 2>/dev/null || true
+            
+            if [ -z "$TOKEN_FILE" ]; then
+              echo "::warning::Timeout waiting for token for account $i"
+              echo "Final log contents:"
+              tail -50 "$LOG_FILE" 2>/dev/null || echo "(no log)"
+            fi
+            
+            # Brief pause between accounts
+            if [ "$i" -lt "$NEEDED" ]; then
+              echo "⏸️ Pausing 5 seconds before next account..."
+              sleep 5
+            fi
           done
+          
+          echo ""
+          echo "=========================================="
+          echo "Authentication phase complete"
+          echo "Tokens collected: $COLLECTED / $NEEDED"
+          echo "=========================================="
+          
+          # Set output for next steps
+          echo "TOKENS_COLLECTED=$COLLECTED" >> "$GITHUB_ENV"
 
-      # ---------- 5.  verify & encrypt ----------
-      - name: Verify and count tokens
+      # ---------- 8. Verify tokens ----------
+      - name: Verify collected tokens
         run: |
-          TOKEN_COUNT=$(find "$HOME/.cli-proxy-api" -name 'qwen-*.json' | wc -l)
-          echo "Tokens collected: $TOKEN_COUNT"
-          [ "$TOKEN_COUNT" -eq 0 ] && echo "❌ No tokens!" && exit 1
+          set -euo pipefail
+          
+          echo "::group::Verifying collected tokens"
+          
+          TOKEN_COUNT=$(find "$AUTH_DIR" -maxdepth 1 -name 'qwen-*.json' 2>/dev/null | wc -l)
+          NEEDED=${{ github.event.inputs.num_accounts }}
+          
+          echo "Token files found: $TOKEN_COUNT"
+          echo "Tokens requested: $NEEDED"
+          
+          if [ "$TOKEN_COUNT" -eq 0 ]; then
+            echo "::error::No tokens were collected!"
+            echo ""
+            echo "Possible issues:"
+            echo "1. You didn't complete the OAuth login in time"
+            echo "2. The authentication process failed"
+            echo "3. Network/firewall issues"
+            echo ""
+            echo "Please re-run the workflow and complete the authentication."
+            exit 1
+          fi
+          
+          echo ""
+          echo "Collected token files:"
+          ls -la "$AUTH_DIR"/qwen-*.json 2>/dev/null || true
+          
+          if [ "$TOKEN_COUNT" -lt "$NEEDED" ]; then
+            echo "::warning::Only $TOKEN_COUNT of $NEEDED tokens were collected"
+          fi
+          
+          echo "::endgroup::"
 
-      - name: Collect and encrypt tokens
+      # ---------- 9. Encrypt tokens ----------
+      - name: Package and encrypt tokens
         run: |
-          TEMP=$(mktemp -d)
-          find "$HOME/.cli-proxy-api" -name 'qwen-*.json' -exec cp {} "$TEMP/" \;
-          cd "$TEMP"
+          set -euo pipefail
+          
+          echo "::group::Encrypting tokens"
+          
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+          
+          # Copy all token files to temp directory
+          cp "$AUTH_DIR"/qwen-*.json . 2>/dev/null || true
+          
+          TOKEN_COUNT=$(ls qwen-*.json 2>/dev/null | wc -l)
+          echo "Packaging $TOKEN_COUNT token files..."
+          
+          # Create tarball
           tar -czf qwen-tokens.tar.gz qwen-*.json
+          echo "Created tarball: $(ls -lh qwen-tokens.tar.gz)"
+          
+          # Encrypt with AES-256-CBC (matching strix-scan.yml decryption)
+          # Using -pbkdf2 for key derivation (more secure)
           openssl enc -aes-256-cbc -salt -pbkdf2 \
-            -in qwen-tokens.tar.gz -out qwen-tokens.enc \
-            -pass pass:${{ github.event.inputs.encryption_password }}
+            -in qwen-tokens.tar.gz \
+            -out qwen-tokens.enc \
+            -pass pass:'${{ github.event.inputs.encryption_password }}'
+          
+          echo "Encrypted file: $(ls -lh qwen-tokens.enc)"
+          
+          # Base64 encode for storage as GitHub secret
           base64 -w 0 qwen-tokens.enc > "$HOME/qwen-tokens.b64"
-          rm -rf "$TEMP"
+          
+          echo "Base64 encoded file: $(ls -lh "$HOME/qwen-tokens.b64")"
+          
+          # Cleanup temp files
+          rm -rf "$TEMP_DIR"
+          
+          echo "::endgroup::"
 
-      # ---------- 6.  upload artifact ----------
+      # ---------- 10. Upload artifact ----------
       - name: Upload encrypted tokens
         uses: actions/upload-artifact@v4
         with:
           name: qwen-encrypted-tokens
           path: ~/qwen-tokens.b64
-          retention-days: 1
+          retention-days: 7
 
-      - name: Job summary
+      # ---------- 11. Show instructions ----------
+      - name: Show usage instructions
         run: |
-          echo "## ✅  All ${{ github.event.inputs.num_accounts }} Qwen tokens collected & encrypted" >> $GITHUB_STEP_SUMMARY
-          echo "Upload the artifact **qwen-encrypted-tokens** to your secret store and remember the encryption password!" >> $GITHUB_STEP_SUMMARY
+          TOKEN_COUNT=$(find "$AUTH_DIR" -maxdepth 1 -name 'qwen-*.json' 2>/dev/null | wc -l)
+          
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ## ✅ Token Collection Complete
+          
+          EOF
+          
+          echo "**Tokens collected:** $TOKEN_COUNT / ${{ github.event.inputs.num_accounts }}" >> $GITHUB_STEP_SUMMARY
+          
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          
+          ### 📦 Next Steps
+          
+          1. **Download the artifact** `qwen-encrypted-tokens` from this workflow run
+          
+          2. **Get the base64 content** from the downloaded `qwen-tokens.b64` file
+          
+          3. **Create a repository secret** named `QWEN_TOKENS`:
+             - Go to Settings → Secrets and variables → Actions
+             - Click "New repository secret"
+             - Name: `QWEN_TOKENS`
+             - Value: Paste the entire content of `qwen-tokens.b64`
+          
+          4. **Run strix-scan.yml** with the same encryption password
+          
+          ### 🔐 Security Notes
+          
+          - The artifact is encrypted with AES-256-CBC
+          - Keep your encryption password safe - you'll need it for strix-scan.yml
+          - The artifact expires in 7 days
+          - Never share your tokens or encryption password
+          
+          ### 🔄 To add more accounts later
+          
+          Re-run this workflow with a higher number of accounts. The new tokens will replace the old ones.
+          EOF
+
+      # ---------- 12. Cleanup sensitive files ----------
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf "$AUTH_DIR"/qwen-*.json 2>/dev/null || true
+          rm -f "$HOME/qwen-tokens.b64" 2>/dev/null || true
+          echo "Sensitive files cleaned up"
