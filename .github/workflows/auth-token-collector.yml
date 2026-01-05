@@ -30,7 +30,13 @@ jobs:
         with:
           go-version: '1.21'
 
-      # ---------- 3. Install CLIProxyAPI ----------
+      # ---------- 3. Install expect and other tools ----------
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y expect
+
+      # ---------- 4. Install CLIProxyAPI ----------
       - name: Install CLIProxyAPI
         run: |
           set -euo pipefail
@@ -44,7 +50,7 @@ jobs:
           cliproxyapi --help
           echo "::endgroup::"
 
-      # ---------- 4. Validate aliases secret ----------
+      # ---------- 5. Validate aliases secret ----------
       - name: Validate QWEN_ALIASES secret
         env:
           QWEN_ALIASES: ${{ secrets.QWEN_ALIASES }}
@@ -69,7 +75,7 @@ jobs:
           
           echo "✅ Alias validation passed"
 
-      # ---------- 5. Create auth directory structure ----------
+      # ---------- 6. Create auth directory structure ----------
       - name: Create auth directory structure
         run: |
           set -euo pipefail
@@ -79,22 +85,20 @@ jobs:
           echo "AUTH_DIR=$AUTH_DIR" >> "$GITHUB_ENV"
           echo "✅ Auth directory created: $AUTH_DIR"
 
-      # ---------- 6. Create config file ----------
+      # ---------- 7. Create config file ----------
       - name: Create CLIProxyAPI config
         run: |
           set -euo pipefail
-          cat > "$AUTH_DIR/config.yaml" << 'EOF'
+          cat > "$AUTH_DIR/config.yaml" << EOF
           port: 8317
-          auth-dir: "${AUTH_DIR}"
+          auth-dir: "$AUTH_DIR"
           debug: true
           logging-to-file: true
           EOF
-          # Replace the placeholder with actual path
-          sed -i "s|\${AUTH_DIR}|$AUTH_DIR|g" "$AUTH_DIR/config.yaml"
           echo "Config file created:"
           cat "$AUTH_DIR/config.yaml"
 
-      # ---------- 7. Authenticate accounts sequentially ----------
+      # ---------- 8. Authenticate accounts sequentially ----------
       - name: Authenticate accounts sequentially
         env:
           QWEN_ALIASES: ${{ secrets.QWEN_ALIASES }}
@@ -125,23 +129,67 @@ jobs:
             
             # Create log file for this account
             LOG_FILE="/tmp/cliproxy-$i.log"
+            EXPECT_SCRIPT="/tmp/auth-$i.exp"
             
-            # Start CLIProxyAPI in background with the alias piped to stdin
-            # The tool reads the alias from stdin after OAuth completes
-            echo "$CURRENT_ALIAS" | timeout 600 cliproxyapi \
-              -config "$AUTH_DIR/config.yaml" \
-              -qwen-login \
-              -no-browser > "$LOG_FILE" 2>&1 &
-            SERVER_PID=$!
+            # Create expect script that will:
+            # 1. Start CLIProxyAPI and wait for the OAuth URL
+            # 2. Wait for the alias prompt after user authenticates
+            # 3. Send the alias automatically
+            cat > "$EXPECT_SCRIPT" << EXPECT_EOF
+          #!/usr/bin/expect -f
+          set timeout 660
+          set alias "$CURRENT_ALIAS"
+          
+          # Start CLIProxyAPI
+          spawn cliproxyapi -config "$AUTH_DIR/config.yaml" -qwen-login -no-browser
+          
+          # Log file for capturing output
+          log_file -noappend "$LOG_FILE"
+          
+          # Wait for the alias prompt (this appears after OAuth completes)
+          # The prompt is: "Please input your email address or alias for Qwen:"
+          expect {
+              -re {Please input your email address or alias} {
+                  # Small delay before sending
+                  sleep 1
+                  send "\$alias\r"
+                  exp_continue
+              }
+              -re {Authentication saved to} {
+                  # Success! Token was saved
+                  puts "\n✅ Authentication successful!"
+              }
+              -re {authentication successful} {
+                  # Success message
+                  puts "\n✅ Authentication completed!"
+              }
+              timeout {
+                  puts "\n⏰ Timeout waiting for authentication"
+                  exit 1
+              }
+              eof {
+                  puts "\n📝 Process ended"
+              }
+          }
+          
+          # Give it a moment to finish writing files
+          sleep 2
+          EXPECT_EOF
             
-            echo "Started CLIProxyAPI (PID: $SERVER_PID)"
+            chmod +x "$EXPECT_SCRIPT"
+            
+            # Run expect script in background
+            $EXPECT_SCRIPT > /tmp/expect-$i.log 2>&1 &
+            EXPECT_PID=$!
+            
+            echo "Started authentication process (PID: $EXPECT_PID)"
             
             # Wait for OAuth URL to appear in log
             echo "Waiting for OAuth URL..."
             URL=""
             for retry in {1..60}; do
               if [ -f "$LOG_FILE" ]; then
-                URL=$(grep -oP 'https://[^\s"]+' "$LOG_FILE" 2>/dev/null | head -1 || true)
+                URL=$(grep -oP 'https://chat\.qwen\.ai/authorize[^\s"]+' "$LOG_FILE" 2>/dev/null | head -1 || true)
                 if [ -n "$URL" ]; then
                   break
                 fi
@@ -153,7 +201,8 @@ jobs:
               echo "::warning::No OAuth URL found for account $i"
               echo "Log contents:"
               cat "$LOG_FILE" 2>/dev/null || echo "(empty log)"
-              kill $SERVER_PID 2>/dev/null || true
+              cat /tmp/expect-$i.log 2>/dev/null || echo "(empty expect log)"
+              kill $EXPECT_PID 2>/dev/null || true
               continue
             fi
             
@@ -167,15 +216,19 @@ jobs:
             echo "   $URL"
             echo ""
             echo "⏳ Waiting for authentication (timeout: 10 minutes)..."
-            echo "   Alias '$CURRENT_ALIAS' will be automatically used."
+            echo "   Alias '$CURRENT_ALIAS' will be automatically entered."
             echo ""
             
-            # Wait for token file to appear
+            # Wait for token file to appear OR for expect process to complete
             TOKEN_FILE=""
             for s in {1..600}; do
-              # Check if the process is still running
-              if ! kill -0 $SERVER_PID 2>/dev/null; then
-                echo "CLIProxyAPI process ended"
+              # Check if expect process is still running
+              if ! kill -0 $EXPECT_PID 2>/dev/null; then
+                echo "Authentication process ended"
+                # Check if it was successful
+                if grep -q "Authentication saved to\|authentication successful" /tmp/expect-$i.log 2>/dev/null; then
+                  echo "✅ Authentication completed successfully"
+                fi
                 break
               fi
               
@@ -184,6 +237,8 @@ jobs:
               if [ -n "$TOKEN_FILE" ]; then
                 echo "✅ Token file created: $(basename "$TOKEN_FILE")"
                 COLLECTED=$((COLLECTED + 1))
+                # Kill the expect process since we got the token
+                kill $EXPECT_PID 2>/dev/null || true
                 break
               fi
               
@@ -195,15 +250,27 @@ jobs:
               sleep 1
             done
             
-            # Clean up the process
-            kill $SERVER_PID 2>/dev/null || true
-            wait $SERVER_PID 2>/dev/null || true
+            # Clean up the expect process if still running
+            kill $EXPECT_PID 2>/dev/null || true
+            wait $EXPECT_PID 2>/dev/null || true
             
+            # Final check for token file
             if [ -z "$TOKEN_FILE" ]; then
-              echo "::warning::Timeout waiting for token for account $i"
-              echo "Final log contents:"
-              tail -50 "$LOG_FILE" 2>/dev/null || echo "(no log)"
+              TOKEN_FILE=$(find "$AUTH_DIR" -maxdepth 1 -name "qwen-*.json" -print -quit 2>/dev/null || true)
+              if [ -n "$TOKEN_FILE" ]; then
+                echo "✅ Token file found: $(basename "$TOKEN_FILE")"
+                COLLECTED=$((COLLECTED + 1))
+              else
+                echo "::warning::No token file found for account $i"
+                echo "Expect log contents:"
+                tail -50 /tmp/expect-$i.log 2>/dev/null || echo "(no expect log)"
+                echo "CLIProxyAPI log contents:"
+                tail -50 "$LOG_FILE" 2>/dev/null || echo "(no log)"
+              fi
             fi
+            
+            # Clean up temp files
+            rm -f "$EXPECT_SCRIPT" /tmp/expect-$i.log
             
             # Brief pause between accounts
             if [ "$i" -lt "$NEEDED" ]; then
@@ -221,7 +288,7 @@ jobs:
           # Set output for next steps
           echo "TOKENS_COLLECTED=$COLLECTED" >> "$GITHUB_ENV"
 
-      # ---------- 8. Verify tokens ----------
+      # ---------- 9. Verify tokens ----------
       - name: Verify collected tokens
         run: |
           set -euo pipefail
@@ -256,7 +323,7 @@ jobs:
           
           echo "::endgroup::"
 
-      # ---------- 9. Encrypt tokens ----------
+      # ---------- 10. Encrypt tokens ----------
       - name: Package and encrypt tokens
         run: |
           set -euo pipefail
@@ -295,7 +362,7 @@ jobs:
           
           echo "::endgroup::"
 
-      # ---------- 10. Upload artifact ----------
+      # ---------- 11. Upload artifact ----------
       - name: Upload encrypted tokens
         uses: actions/upload-artifact@v4
         with:
@@ -303,7 +370,7 @@ jobs:
           path: ~/qwen-tokens.b64
           retention-days: 7
 
-      # ---------- 11. Show instructions ----------
+      # ---------- 12. Show instructions ----------
       - name: Show usage instructions
         run: |
           TOKEN_COUNT=$(find "$AUTH_DIR" -maxdepth 1 -name 'qwen-*.json' 2>/dev/null | wc -l)
@@ -343,10 +410,11 @@ jobs:
           Re-run this workflow with a higher number of accounts. The new tokens will replace the old ones.
           EOF
 
-      # ---------- 12. Cleanup sensitive files ----------
+      # ---------- 13. Cleanup sensitive files ----------
       - name: Cleanup
         if: always()
         run: |
           rm -rf "$AUTH_DIR"/qwen-*.json 2>/dev/null || true
           rm -f "$HOME/qwen-tokens.b64" 2>/dev/null || true
+          rm -f /tmp/cliproxy-*.log /tmp/expect-*.log /tmp/auth-*.exp 2>/dev/null || true
           echo "Sensitive files cleaned up"
