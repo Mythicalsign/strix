@@ -74,6 +74,11 @@ on:
         required: false
         default: true
         type: boolean
+      enable_dashboard:
+        description: 'Enable real-time web dashboard'
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   group: striflow-${{ github.head_ref || github.ref }}
@@ -84,6 +89,7 @@ env:
   DEFAULT_WARNING_MINUTES: '5'
   DEFAULT_SCAN_MODE: 'standard'
   CLIPROXY_PORT: '8317'
+  DASHBOARD_PORT: '8080'
 
 jobs:
   striflow-scan:
@@ -120,6 +126,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Install Cloudflared for Dashboard Tunnel
+        if: ${{ github.event.inputs.enable_dashboard == 'true' || github.event.inputs.enable_dashboard == '' }}
+        run: |
+          set -euo pipefail
+          echo "::group::Installing Cloudflared"
+          # Download and install cloudflared
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+          rm cloudflared.deb
+          echo "Cloudflared installed: $(cloudflared --version)"
+          echo "::endgroup::"
 
       - name: Decrypt Qwen Tokens
         id: decrypt
@@ -242,6 +260,152 @@ jobs:
           python -m strix.interface.main --help > /dev/null 2>&1 || echo "Strix CLI loaded"
           echo "Strix installation complete"
           echo "::endgroup::"
+
+      - name: Start Web Dashboard Server
+        id: dashboard
+        if: ${{ github.event.inputs.enable_dashboard == 'true' || github.event.inputs.enable_dashboard == '' }}
+        run: |
+          set -euo pipefail
+          echo "::group::Starting Web Dashboard"
+          
+          # Create dashboard launcher script
+          cat > /tmp/start_dashboard.py << 'PYEOF'
+          import sys
+          sys.path.insert(0, '/tmp/strix')
+          
+          from strix.dashboard.web_server import start_web_dashboard, update_dashboard_state
+          import time
+          import signal
+          
+          def signal_handler(sig, frame):
+              print("Dashboard shutting down...")
+              sys.exit(0)
+          
+          signal.signal(signal.SIGTERM, signal_handler)
+          signal.signal(signal.SIGINT, signal_handler)
+          
+          # Start dashboard
+          server = start_web_dashboard(host='0.0.0.0', port=8080)
+          print(f"Dashboard running at http://localhost:8080")
+          
+          # Initialize with scan config
+          update_dashboard_state({
+              "scan_config": {
+                  "targets": [{"original": "${{ github.event.inputs.target }}"}],
+                  "user_instructions": "${{ github.event.inputs.prompt }}",
+              },
+              "time": {
+                  "duration_minutes": ${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }},
+                  "warning_minutes": ${{ github.event.inputs.warning_minutes || env.DEFAULT_WARNING_MINUTES }},
+                  "status": "🟢 Starting scan...",
+              }
+          })
+          
+          # Keep running
+          while True:
+              time.sleep(1)
+          PYEOF
+          
+          # Start dashboard in background
+          nohup python /tmp/start_dashboard.py > /tmp/dashboard.log 2>&1 &
+          DASHBOARD_PID=$!
+          echo "$DASHBOARD_PID" > /tmp/dashboard.pid
+          
+          # Wait for dashboard to start
+          sleep 5
+          
+          if ! kill -0 $DASHBOARD_PID 2>/dev/null; then
+            echo "Dashboard failed to start. Logs:"
+            cat /tmp/dashboard.log || true
+            echo "Continuing without dashboard..."
+            echo "dashboard_enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          # Verify dashboard is responding
+          for i in {1..10}; do
+            if curl -s "http://localhost:${{ env.DASHBOARD_PORT }}/health" > /dev/null 2>&1; then
+              echo "Dashboard is healthy!"
+              break
+            fi
+            echo "Waiting for dashboard... (attempt $i/10)"
+            sleep 2
+          done
+          
+          echo "dashboard_pid=$DASHBOARD_PID" >> "$GITHUB_OUTPUT"
+          echo "dashboard_enabled=true" >> "$GITHUB_OUTPUT"
+          echo "Dashboard started on port ${{ env.DASHBOARD_PORT }}"
+          echo "::endgroup::"
+
+      - name: Start Dashboard Tunnel
+        id: tunnel
+        if: ${{ steps.dashboard.outputs.dashboard_enabled == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "::group::Starting Dashboard Tunnel"
+          
+          # Start cloudflared tunnel in background
+          nohup cloudflared tunnel --url http://localhost:${{ env.DASHBOARD_PORT }} > /tmp/tunnel.log 2>&1 &
+          TUNNEL_PID=$!
+          echo "$TUNNEL_PID" > /tmp/tunnel.pid
+          
+          # Wait for tunnel to establish and get URL
+          sleep 10
+          
+          # Extract the tunnel URL from logs
+          DASHBOARD_URL=""
+          for i in {1..30}; do
+            DASHBOARD_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/tunnel.log | head -1 || true)
+            if [ -n "$DASHBOARD_URL" ]; then
+              break
+            fi
+            echo "Waiting for tunnel URL... (attempt $i/30)"
+            sleep 2
+          done
+          
+          if [ -z "$DASHBOARD_URL" ]; then
+            echo "::warning::Could not establish tunnel. Dashboard will only be accessible locally."
+            cat /tmp/tunnel.log || true
+            echo "dashboard_url=" >> "$GITHUB_OUTPUT"
+          else
+            echo "=========================================="
+            echo "🌐 LIVE DASHBOARD URL"
+            echo "=========================================="
+            echo ""
+            echo "  $DASHBOARD_URL"
+            echo ""
+            echo "=========================================="
+            echo "Open this URL in your browser to monitor"
+            echo "the scan progress in real-time!"
+            echo "=========================================="
+            echo "dashboard_url=$DASHBOARD_URL" >> "$GITHUB_OUTPUT"
+          fi
+          
+          echo "tunnel_pid=$TUNNEL_PID" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      - name: Display Dashboard URL
+        if: ${{ steps.tunnel.outputs.dashboard_url != '' }}
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║                                                              ║"
+          echo "║  🦉 STRIX LIVE DASHBOARD                                     ║"
+          echo "║                                                              ║"
+          echo "║  Monitor your scan in real-time at:                          ║"
+          echo "║                                                              ║"
+          echo "║  ${{ steps.tunnel.outputs.dashboard_url }}"
+          echo "║                                                              ║"
+          echo "║  Features:                                                   ║"
+          echo "║  • Real-time agent activity feed                             ║"
+          echo "║  • Multi-agent collaboration view                            ║"
+          echo "║  • Vulnerability discoveries                                 ║"
+          echo "║  • Tool execution history                                    ║"
+          echo "║  • Time remaining countdown                                  ║"
+          echo "║  • Resource usage stats                                      ║"
+          echo "║                                                              ║"
+          echo "╚══════════════════════════════════════════════════════════════╝"
+          echo ""
           
       - name: Create Strix Configuration
         id: config
@@ -254,9 +418,30 @@ jobs:
           MODEL="${{ github.event.inputs.model || 'qwen3-coder-plus' }}"
           ENABLE_STRIXDB="${{ github.event.inputs.enable_strixdb }}"
           [ -z "$ENABLE_STRIXDB" ] && ENABLE_STRIXDB="true"
+          
+          # Create proper JSON config for both locations
           for CONFIG_DIR in "$GITHUB_WORKSPACE" "/tmp/strix"; do
-          echo "JSON config created" > "$CONFIG_DIR/config.json"
+            cat > "$CONFIG_DIR/config.json" << CONFIGEOF
+          {
+            "api": {
+              "endpoint": "${{ steps.cliproxy.outputs.endpoint }}",
+              "model": "$MODEL"
+            },
+            "timeframe": {
+              "duration_minutes": $TIMEFRAME,
+              "warning_minutes": $WARNING,
+              "time_awareness_enabled": true
+            },
+            "dashboard": {
+              "enabled": true,
+              "web_dashboard_enabled": true,
+              "web_dashboard_port": ${{ env.DASHBOARD_PORT }}
+            },
+            "scan_mode": "$SCAN_MODE"
+          }
+          CONFIGEOF
           done
+          
           echo "Configuration Summary:"
           echo "  - Endpoint: ${{ steps.cliproxy.outputs.endpoint }}"
           echo "  - Model: $MODEL"
@@ -265,6 +450,7 @@ jobs:
           echo "  - Scan Mode: $SCAN_MODE"
           echo "  - Accounts: ${{ steps.decrypt.outputs.token_count }}"
           echo "  - StrixDB: $ENABLE_STRIXDB"
+          echo "  - Dashboard: ${{ steps.tunnel.outputs.dashboard_url || 'local only' }}"
           echo "::endgroup::"
           
       - name: Prepare Instructions
@@ -290,6 +476,8 @@ jobs:
           CUSTOM_LLM_PROVIDER: openai
           OPENAI_API_KEY: sk-dummy-key-for-cliproxy
           OPENAI_API_BASE: ${{ steps.cliproxy.outputs.endpoint }}
+          STRIX_WEB_DASHBOARD: 'true'
+          STRIX_DASHBOARD_PORT: ${{ env.DASHBOARD_PORT }}
         run: |
           set +euo pipefail
           echo "::group::Running Strix Security Scan"
@@ -297,6 +485,7 @@ jobs:
           TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
           SCAN_MODE="${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}"
           INSTRUCTIONS="${{ steps.instructions.outputs.instructions }}"
+          
           echo "=========================================="
           echo "STRIX SECURITY SCAN STARTING"
           echo "=========================================="
@@ -305,7 +494,11 @@ jobs:
           echo "Scan Mode: $SCAN_MODE"
           echo "Model: openai/${{ github.event.inputs.model || 'qwen3-coder-plus' }}"
           echo "Accounts: ${{ steps.decrypt.outputs.token_count }}"
+          if [ -n "${{ steps.tunnel.outputs.dashboard_url }}" ]; then
+            echo "Dashboard: ${{ steps.tunnel.outputs.dashboard_url }}"
+          fi
           echo "=========================================="
+          
           cd "$GITHUB_WORKSPACE"
           CMD="python -m strix.interface.main --target \"$TARGET\" --scan-mode $SCAN_MODE --non-interactive"
           if [ -n "$INSTRUCTIONS" ]; then
@@ -345,6 +538,28 @@ jobs:
           echo "::endgroup::"
           exit 0
 
+      - name: Stop Dashboard and Tunnel
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "::group::Stopping Dashboard Services"
+          
+          # Stop tunnel
+          if [ -f /tmp/tunnel.pid ]; then
+            TUNNEL_PID=$(cat /tmp/tunnel.pid)
+            kill $TUNNEL_PID 2>/dev/null || true
+            echo "Tunnel stopped (PID: $TUNNEL_PID)"
+          fi
+          
+          # Stop dashboard
+          if [ -f /tmp/dashboard.pid ]; then
+            DASHBOARD_PID=$(cat /tmp/dashboard.pid)
+            kill $DASHBOARD_PID 2>/dev/null || true
+            echo "Dashboard stopped (PID: $DASHBOARD_PID)"
+          fi
+          
+          echo "::endgroup::"
+
       - name: Stop CLIProxyAPI Server
         if: always()
         run: |
@@ -374,6 +589,8 @@ jobs:
             strix_runs/
             strix_output.log
             config.json
+            /tmp/dashboard.log
+            /tmp/tunnel.log
           retention-days: 30
 
       - name: Create Security Summary
@@ -388,6 +605,7 @@ jobs:
           SCAN_MODE="${{ github.event.inputs.scan_mode || env.DEFAULT_SCAN_MODE }}"
           MODEL="${{ github.event.inputs.model || 'qwen3-coder-plus' }}"
           TARGET="${{ github.event.inputs.target }}"
+          DASHBOARD_URL="${{ steps.tunnel.outputs.dashboard_url }}"
           
           # Determine status emoji and text
           if [ "$TIMED_OUT" == "true" ]; then
@@ -423,9 +641,27 @@ jobs:
           | **Qwen Accounts** | $TOKEN_COUNT (load-balanced) |
           | **Exit Code** | $EXIT_CODE |
           
+          SUMMARY_EOF
+          
+          # Add dashboard info if available
+          if [ -n "$DASHBOARD_URL" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" << DASHEOF
+          
+          ### 🌐 Live Dashboard
+          
+          The real-time web dashboard was available at:
+          \`$DASHBOARD_URL\`
+          
+          *(Dashboard URL is only active during the scan)*
+          
+          DASHEOF
+          fi
+          
+          cat >> "$GITHUB_STEP_SUMMARY" << FINDINGSEOF
+          
           ### 🔍 Findings
           
-          SUMMARY_EOF
+          FINDINGSEOF
           
           # Add vulnerability info
           VULN_NUM=${VULNS:-0}
@@ -449,6 +685,8 @@ jobs:
           - ✅ Automatic Token Refresh (15-minute intervals)
           - ✅ Health Check Enabled
           - ✅ Request Retry (3 attempts)
+          - ✅ Real-Time Web Dashboard
+          - ✅ Multi-Agent Collaboration
           
           ---
           
@@ -458,6 +696,8 @@ jobs:
           - `strix_runs/` - Detailed scan results and reports
           - `strix_output.log` - Complete scan output log
           - `config.json` - Scan configuration
+          - `dashboard.log` - Dashboard server logs
+          - `tunnel.log` - Tunnel connection logs
           
           ---
           
@@ -476,6 +716,7 @@ jobs:
             const exitCode = '${{ steps.strix.outputs.exit_code }}';
             const timeframe = '${{ github.event.inputs.timeframe }}' || '${{ env.DEFAULT_TIMEFRAME }}';
             const tokenCount = '${{ steps.decrypt.outputs.token_count }}';
+            const dashboardUrl = '${{ steps.tunnel.outputs.dashboard_url }}';
 
             let summary = '## StriFlow Security Scan Results\\n\\n';
             if (timedOut) {
@@ -496,7 +737,8 @@ jobs:
             summary += '### Features:\\n';
             summary += '- Multi-Action Mode (7 actions/call)\\n';
             summary += '- Qwen Token Load Balancing\\n';
-            summary += '- Continuous Scanning\\n\\n';
+            summary += '- Real-Time Web Dashboard\\n';
+            summary += '- Multi-Agent Collaboration\\n\\n';
             summary += `[View Full Results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\\n`;
 
             await github.rest.issues.createComment({

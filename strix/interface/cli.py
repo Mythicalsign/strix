@@ -1,4 +1,5 @@
 import atexit
+import os
 import signal
 import sys
 import threading
@@ -19,6 +20,11 @@ from .utils import build_final_stats_text, build_live_stats_text, get_severity_c
 
 async def run_cli(args: Any) -> None:  # noqa: PLR0915
     console = Console()
+    
+    # Check if web dashboard should be enabled
+    web_dashboard_enabled = os.getenv("STRIX_WEB_DASHBOARD", "false").lower() == "true"
+    web_dashboard_port = int(os.getenv("STRIX_DASHBOARD_PORT", "8080"))
+    web_dashboard_integration = None
 
     start_text = Text()
     start_text.append("🦉 ", style="bold white")
@@ -121,10 +127,17 @@ async def run_cli(args: Any) -> None:  # noqa: PLR0915
     tracer.vulnerability_found_callback = display_vulnerability
 
     def cleanup_on_exit() -> None:
+        # Stop web dashboard if running
+        nonlocal web_dashboard_integration
+        if web_dashboard_integration:
+            try:
+                web_dashboard_integration.stop()
+            except Exception:
+                pass
         tracer.cleanup()
 
     def signal_handler(_signum: int, _frame: Any) -> None:
-        tracer.cleanup()
+        cleanup_on_exit()
         sys.exit(1)
 
     atexit.register(cleanup_on_exit)
@@ -134,6 +147,35 @@ async def run_cli(args: Any) -> None:  # noqa: PLR0915
         signal.signal(signal.SIGHUP, signal_handler)
 
     set_global_tracer(tracer)
+    
+    # Start web dashboard if enabled
+    if web_dashboard_enabled:
+        try:
+            from strix.dashboard.web_integration import setup_web_dashboard
+            from strix.config import get_config
+            
+            try:
+                config = get_config()
+                duration_minutes = config.timeframe.duration_minutes
+                warning_minutes = config.timeframe.warning_minutes
+            except Exception:
+                duration_minutes = 60.0
+                warning_minutes = 5.0
+            
+            web_dashboard_integration = setup_web_dashboard(
+                tracer=tracer,
+                host="0.0.0.0",
+                port=web_dashboard_port,
+                duration_minutes=duration_minutes,
+                warning_minutes=warning_minutes,
+            )
+            
+            dashboard_url = web_dashboard_integration.get_url()
+            console.print(f"[bold green]🌐 Web Dashboard:[/] {dashboard_url}")
+            console.print()
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Web dashboard failed to start: {e}[/]")
+            console.print()
 
     def create_live_status() -> Panel:
         status_text = Text()
@@ -165,6 +207,14 @@ async def run_cli(args: Any) -> None:  # noqa: PLR0915
                 while not stop_updates.is_set():
                     try:
                         live.update(create_live_status())
+                        
+                        # Update web dashboard if enabled
+                        if web_dashboard_integration:
+                            try:
+                                web_dashboard_integration._sync_from_tracer()
+                            except Exception:
+                                pass
+                        
                         time.sleep(2)
                     except Exception:  # noqa: BLE001
                         break
