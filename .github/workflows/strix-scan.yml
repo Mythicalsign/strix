@@ -198,12 +198,14 @@ jobs:
               load-balance: true
               round-robin: true
               health-check: true
+              auto-refresh: true
           quota-exceeded:
             switch-project: true
             switch-preview-model: true
-          request-retry: 3
-          timeout: "300s"
+          request-retry: 5
+          timeout: "600s"
           logging-to-file: true
+          verbose: true
           EOF
           sed -i 's/^          //' "$AUTH_DIR/config.yaml"
           echo "Configuration created at $AUTH_DIR/config.yaml"
@@ -269,14 +271,28 @@ jobs:
           set -euo pipefail
           echo "::group::Starting Web Dashboard"
           
-          # Create dashboard launcher script
+          # Create a shared state file that both dashboard and strix can use
+          SHARED_STATE_FILE="/tmp/strix_dashboard_state.json"
+          echo '{}' > "$SHARED_STATE_FILE"
+          chmod 666 "$SHARED_STATE_FILE"
+          export STRIX_DASHBOARD_STATE_FILE="$SHARED_STATE_FILE"
+          
+          # Create dashboard launcher script with state file monitoring
           cat > /tmp/start_dashboard.py << 'PYEOF'
           import sys
-          sys.path.insert(0, '/tmp/strix')
-          
-          from strix.dashboard.web_server import start_web_dashboard, update_dashboard_state
+          import os
+          import json
           import time
           import signal
+          from datetime import datetime, UTC
+          from pathlib import Path
+          
+          sys.path.insert(0, '/tmp/strix')
+          
+          from strix.dashboard.web_server import start_web_dashboard, update_dashboard_state, get_dashboard_state
+          
+          # Get shared state file path from environment
+          STATE_FILE = os.environ.get('STRIX_DASHBOARD_STATE_FILE', '/tmp/strix_dashboard_state.json')
           
           def signal_handler(sig, frame):
               print("Dashboard shutting down...")
@@ -288,26 +304,94 @@ jobs:
           # Start dashboard
           server = start_web_dashboard(host='0.0.0.0', port=8080)
           print(f"Dashboard running at http://localhost:8080")
+          print(f"Monitoring state file: {STATE_FILE}")
           
-          # Initialize with scan config
+          # Initialize with scan config from environment
+          target = os.environ.get('SCAN_TARGET', 'Unknown')
+          prompt = os.environ.get('SCAN_PROMPT', '')
+          timeframe = int(os.environ.get('SCAN_TIMEFRAME', '60'))
+          warning = int(os.environ.get('SCAN_WARNING', '5'))
+          start_time = datetime.now(UTC)
+          
           update_dashboard_state({
               "scan_config": {
-                  "targets": [{"original": "${{ github.event.inputs.target }}"}],
-                  "user_instructions": "${{ github.event.inputs.prompt }}",
+                  "targets": [{"original": target, "type": "web_application", "details": {"target_url": target}}],
+                  "user_instructions": prompt,
               },
               "time": {
-                  "duration_minutes": ${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }},
-                  "warning_minutes": ${{ github.event.inputs.warning_minutes || env.DEFAULT_WARNING_MINUTES }},
+                  "start_time": start_time.isoformat(),
+                  "duration_minutes": timeframe,
+                  "warning_minutes": warning,
+                  "elapsed_minutes": 0,
+                  "remaining_minutes": timeframe,
+                  "progress_percentage": 0,
                   "status": "🟢 Starting scan...",
+                  "is_warning": False,
+                  "is_critical": False,
               }
           })
           
-          # Keep running
+          last_mtime = 0
+          
+          # Keep running and monitor state file for updates
           while True:
+              try:
+                  # Check if state file was updated by strix
+                  if Path(STATE_FILE).exists():
+                      mtime = Path(STATE_FILE).stat().st_mtime
+                      if mtime > last_mtime:
+                          last_mtime = mtime
+                          with open(STATE_FILE, 'r') as f:
+                              external_state = json.load(f)
+                          if external_state:
+                              update_dashboard_state(external_state)
+                  
+                  # Update time tracking
+                  elapsed = (datetime.now(UTC) - start_time).total_seconds() / 60.0
+                  remaining = max(0.0, timeframe - elapsed)
+                  progress = min(100.0, (elapsed / timeframe) * 100) if timeframe > 0 else 0
+                  
+                  is_warning = remaining <= warning
+                  is_critical = remaining <= (warning / 2)
+                  
+                  if remaining <= 0:
+                      status = "⏰ TIME EXPIRED"
+                  elif is_critical:
+                      status = f"🔴 {remaining:.1f}m remaining (CRITICAL)"
+                  elif is_warning:
+                      status = f"🟡 {remaining:.1f}m remaining (Warning)"
+                  else:
+                      status = f"🟢 {remaining:.1f}m remaining ({progress:.0f}%)"
+                  
+                  update_dashboard_state({
+                      "time": {
+                          "elapsed_minutes": elapsed,
+                          "remaining_minutes": remaining,
+                          "progress_percentage": progress,
+                          "status": status,
+                          "is_warning": is_warning,
+                          "is_critical": is_critical,
+                      }
+                  })
+                  
+              except Exception as e:
+                  print(f"State sync error: {e}")
+              
               time.sleep(1)
           PYEOF
           
-          # Start dashboard in background
+          # Export environment variables for the dashboard script
+          export SCAN_TARGET="${{ github.event.inputs.target }}"
+          export SCAN_PROMPT="${{ github.event.inputs.prompt }}"
+          export SCAN_TIMEFRAME="${{ github.event.inputs.timeframe || env.DEFAULT_TIMEFRAME }}"
+          export SCAN_WARNING="${{ github.event.inputs.warning_minutes || env.DEFAULT_WARNING_MINUTES }}"
+          
+          # Start dashboard in background with environment variables
+          STRIX_DASHBOARD_STATE_FILE="$SHARED_STATE_FILE" \
+          SCAN_TARGET="$SCAN_TARGET" \
+          SCAN_PROMPT="$SCAN_PROMPT" \
+          SCAN_TIMEFRAME="$SCAN_TIMEFRAME" \
+          SCAN_WARNING="$SCAN_WARNING" \
           nohup python /tmp/start_dashboard.py > /tmp/dashboard.log 2>&1 &
           DASHBOARD_PID=$!
           echo "$DASHBOARD_PID" > /tmp/dashboard.pid
@@ -335,6 +419,7 @@ jobs:
           
           echo "dashboard_pid=$DASHBOARD_PID" >> "$GITHUB_OUTPUT"
           echo "dashboard_enabled=true" >> "$GITHUB_OUTPUT"
+          echo "state_file=$SHARED_STATE_FILE" >> "$GITHUB_OUTPUT"
           echo "Dashboard started on port ${{ env.DASHBOARD_PORT }}"
           echo "::endgroup::"
 
@@ -486,6 +571,11 @@ jobs:
           STRIX_DASHBOARD_PORT: ${{ env.DASHBOARD_PORT }}
           # Set LiteLLM to drop unsupported params for better compatibility
           LITELLM_DROP_PARAMS: 'true'
+          # Add retry configuration for LiteLLM
+          LITELLM_NUM_RETRIES: '5'
+          LITELLM_RETRY_DELAY: '2'
+          # Shared state file for dashboard updates
+          STRIX_DASHBOARD_STATE_FILE: /tmp/strix_dashboard_state.json
         run: |
           set +euo pipefail
           echo "::group::Running Strix Security Scan"
@@ -507,14 +597,57 @@ jobs:
           fi
           echo "=========================================="
           
+          # Create a wrapper script that handles retries at the scan level
           cd "$GITHUB_WORKSPACE"
+          
+          # Export dashboard state file path
+          export STRIX_DASHBOARD_STATE_FILE="/tmp/strix_dashboard_state.json"
+          
           CMD="python -m strix.interface.main --target \"$TARGET\" --scan-mode $SCAN_MODE --non-interactive"
           if [ -n "$INSTRUCTIONS" ]; then
             CMD="$CMD --instruction \"$INSTRUCTIONS\""
           fi
-          timeout ${TIMEFRAME}m bash -c "$CMD" 2>&1 | tee strix_output.log
-          EXIT_CODE=${PIPESTATUS[0]}
+          
+          # Run with retry logic for LLM failures
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          SUCCESS=false
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
+            echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES"
+            
+            # Run scan with timeout
+            timeout ${TIMEFRAME}m bash -c "$CMD" 2>&1 | tee strix_output.log
+            EXIT_CODE=${PIPESTATUS[0]}
+            
+            # Check if it was an LLM error that we should retry
+            if grep -qi "Internal server error\|rate limit\|quota exceeded\|connection reset" strix_output.log; then
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "LLM error detected, waiting 30 seconds before retry..."
+                sleep 30
+                # Reduce timeframe for subsequent retries
+                REMAINING_TIME=$((TIMEFRAME - 2))
+                if [ $REMAINING_TIME -gt 5 ]; then
+                  TIMEFRAME=$REMAINING_TIME
+                fi
+              fi
+            else
+              SUCCESS=true
+            fi
+          done
+          # If we exhausted retries, check the final exit code
           EXIT_CODE=${EXIT_CODE:-1}
+          
+          # Log the CLIProxyAPI status for debugging
+          echo "========================================="
+          echo "CLIProxyAPI Status:"
+          if [ -f "$HOME/.cli-proxy-api/cliproxy.log" ]; then
+            echo "Last 30 lines of CLIProxyAPI log:"
+            tail -n 30 "$HOME/.cli-proxy-api/cliproxy.log"
+          fi
+          echo "========================================="
+          
           VULN_COUNT=$(grep -ciE "vulnerability|VULNERABILITY|CVE-|critical|high.*severity" strix_output.log 2>/dev/null || echo "0")
           # Ensure VULN_COUNT is a valid number
           if ! [[ "$VULN_COUNT" =~ ^[0-9]+$ ]]; then
@@ -581,8 +714,11 @@ jobs:
             echo "CLIProxyAPI stopped (PID: $PID)"
           fi
           if [ -f "$AUTH_DIR/cliproxy.log" ]; then
-            echo "Final CLIProxyAPI logs:"
-            tail -n 20 "$AUTH_DIR/cliproxy.log"
+            echo "=========================================="
+            echo "FULL CLIProxyAPI LOGS:"
+            echo "=========================================="
+            cat "$AUTH_DIR/cliproxy.log"
+            echo "=========================================="
           fi
           rm -rf "$AUTH_DIR"/qwen-*.json
           rm -f "$AUTH_DIR/cliproxy.pid"
@@ -599,6 +735,8 @@ jobs:
             config.json
             /tmp/dashboard.log
             /tmp/tunnel.log
+            /tmp/strix_dashboard_state.json
+            ~/.cli-proxy-api/cliproxy.log
           retention-days: 30
 
       - name: Create Security Summary
