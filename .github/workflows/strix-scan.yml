@@ -18,13 +18,11 @@ on:
         default: ''
         type: string
       timeframe:
-        description: 'Maximum runtime in minutes (3-720)'
+        description: 'Maximum runtime in minutes (10-720) - Strix requires minimum 10 minutes'
         required: false
         default: '60'
         type: choice
         options:
-          - '3'
-          - '5'
           - '10'
           - '15'
           - '30'
