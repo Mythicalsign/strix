@@ -12,8 +12,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import litellm
 from docker.errors import DockerException
+from strix.llm.direct_api import (
+    DirectAPIClient,
+    DirectAPIError,
+    get_direct_api_client,
+    is_direct_api_mode,
+)
+
+# Conditional import of litellm
+_litellm_available = False
+try:
+    if not is_direct_api_mode():
+        import litellm
+        _litellm_available = True
+except ImportError:
+    pass
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -218,19 +232,30 @@ async def warm_up_llm() -> None:
 
         llm_timeout = int(os.getenv("LLM_TIMEOUT", "600"))
 
-        completion_kwargs: dict[str, Any] = {
-            "model": model_name,
-            "messages": test_messages,
-            "timeout": llm_timeout,
-        }
-        if api_key:
-            completion_kwargs["api_key"] = api_key
-        if api_base:
-            completion_kwargs["api_base"] = api_base
+        # Use direct API mode if enabled or litellm not available
+        if is_direct_api_mode() or not _litellm_available:
+            console.print("[cyan]Using Direct API mode (no LiteLLM)[/cyan]")
+            client = get_direct_api_client()
+            response = client.chat_completion(
+                messages=test_messages,
+                model=model_name,
+            )
+            # Validate direct API response
+            if not response.content:
+                raise DirectAPIError("Empty response from API")
+        else:
+            completion_kwargs: dict[str, Any] = {
+                "model": model_name,
+                "messages": test_messages,
+                "timeout": llm_timeout,
+            }
+            if api_key:
+                completion_kwargs["api_key"] = api_key
+            if api_base:
+                completion_kwargs["api_base"] = api_base
 
-        response = litellm.completion(**completion_kwargs)
-
-        validate_llm_response(response)
+            response = litellm.completion(**completion_kwargs)
+            validate_llm_response(response)
 
     except Exception as e:  # noqa: BLE001
         error_text = Text()

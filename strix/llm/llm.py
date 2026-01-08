@@ -6,14 +6,11 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
-import litellm
 from jinja2 import (
     Environment,
     FileSystemLoader,
     select_autoescape,
 )
-from litellm import ModelResponse, completion_cost
-from litellm.utils import supports_prompt_caching, supports_vision
 
 from strix.llm.config import LLMConfig
 from strix.llm.memory_compressor import MemoryCompressor
@@ -22,11 +19,35 @@ from strix.llm.utils import _truncate_to_first_function, parse_tool_invocations
 from strix.prompts import load_prompt_modules
 from strix.tools import get_tools_prompt
 
+# Import direct API module for non-LiteLLM mode
+from strix.llm.direct_api import (
+    DirectAPIClient,
+    DirectAPIError,
+    DirectAPIResponse,
+    get_direct_api_client,
+    is_direct_api_mode,
+    supports_prompt_caching as direct_supports_prompt_caching,
+    supports_vision as direct_supports_vision,
+    token_counter as direct_token_counter,
+)
+
+# Conditional import of litellm - only if not in direct API mode
+_litellm_available = False
+try:
+    if not is_direct_api_mode():
+        import litellm
+        from litellm import ModelResponse, completion_cost
+        from litellm.utils import supports_prompt_caching, supports_vision
+        _litellm_available = True
+        litellm.drop_params = True
+        litellm.modify_params = True
+except ImportError:
+    # LiteLLM not available, will use direct API mode
+    pass
+
 
 logger = logging.getLogger(__name__)
 
-litellm.drop_params = True
-litellm.modify_params = True
 
 def _get_api_key() -> str | None:
     """Get API key from config.json or environment.
@@ -220,6 +241,16 @@ class LLM:
         self.agent_id = agent_id
         self._total_stats = RequestStats()
         self._last_request_stats = RequestStats()
+        
+        # Check if we should use direct API mode
+        self._use_direct_api = is_direct_api_mode() or not _litellm_available
+        
+        if self._use_direct_api:
+            logger.info("Using Direct API mode (no LiteLLM)")
+            self._direct_client = get_direct_api_client()
+        else:
+            logger.info("Using LiteLLM mode")
+            self._direct_client = None
 
         self.memory_compressor = MemoryCompressor(
             model_name=self.config.model_name,
@@ -314,6 +345,10 @@ class LLM:
         return interval
 
     def _prepare_cached_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self._use_direct_api:
+            # Direct API mode doesn't support prompt caching
+            return messages
+            
         if (
             not self.config.enable_prompt_caching
             or not supports_prompt_caching(self.config.model_name)
@@ -371,11 +406,17 @@ class LLM:
         cached_messages = self._prepare_cached_messages(messages)
 
         try:
-            response = await self._make_request(cached_messages)
+            if self._use_direct_api:
+                response = await self._make_direct_request(cached_messages)
+            else:
+                response = await self._make_request(cached_messages)
+                
             self._update_usage_stats(response)
 
             content = ""
-            if (
+            if self._use_direct_api:
+                content = response.content if hasattr(response, 'content') else ""
+            elif (
                 response.choices
                 and hasattr(response.choices[0], "message")
                 and response.choices[0].message
@@ -402,49 +443,25 @@ class LLM:
                 tool_invocations=tool_invocations if tool_invocations else None,
             )
 
-        except litellm.RateLimitError as e:
-            raise LLMRequestFailedError("LLM request failed: Rate limit exceeded", str(e)) from e
-        except litellm.AuthenticationError as e:
-            raise LLMRequestFailedError("LLM request failed: Invalid API key", str(e)) from e
-        except litellm.NotFoundError as e:
-            raise LLMRequestFailedError("LLM request failed: Model not found", str(e)) from e
-        except litellm.ContextWindowExceededError as e:
-            raise LLMRequestFailedError("LLM request failed: Context too long", str(e)) from e
-        except litellm.ContentPolicyViolationError as e:
-            raise LLMRequestFailedError(
-                "LLM request failed: Content policy violation", str(e)
-            ) from e
-        except litellm.ServiceUnavailableError as e:
-            raise LLMRequestFailedError("LLM request failed: Service unavailable", str(e)) from e
-        except litellm.Timeout as e:
-            raise LLMRequestFailedError("LLM request failed: Request timed out", str(e)) from e
-        except litellm.UnprocessableEntityError as e:
-            raise LLMRequestFailedError("LLM request failed: Unprocessable entity", str(e)) from e
-        except litellm.InternalServerError as e:
-            raise LLMRequestFailedError("LLM request failed: Internal server error", str(e)) from e
-        except litellm.APIConnectionError as e:
-            raise LLMRequestFailedError("LLM request failed: Connection error", str(e)) from e
-        except litellm.UnsupportedParamsError as e:
-            raise LLMRequestFailedError("LLM request failed: Unsupported parameters", str(e)) from e
-        except litellm.BudgetExceededError as e:
-            raise LLMRequestFailedError("LLM request failed: Budget exceeded", str(e)) from e
-        except litellm.APIResponseValidationError as e:
-            raise LLMRequestFailedError(
-                "LLM request failed: Response validation error", str(e)
-            ) from e
-        except litellm.JSONSchemaValidationError as e:
-            raise LLMRequestFailedError(
-                "LLM request failed: JSON schema validation error", str(e)
-            ) from e
-        except litellm.InvalidRequestError as e:
-            raise LLMRequestFailedError("LLM request failed: Invalid request", str(e)) from e
-        except litellm.BadRequestError as e:
-            raise LLMRequestFailedError("LLM request failed: Bad request", str(e)) from e
-        except litellm.APIError as e:
-            raise LLMRequestFailedError("LLM request failed: API error", str(e)) from e
-        except litellm.OpenAIError as e:
-            raise LLMRequestFailedError("LLM request failed: OpenAI error", str(e)) from e
+        except DirectAPIError as e:
+            raise LLMRequestFailedError(f"Direct API request failed: {e.message}", e.details) from e
         except Exception as e:
+            if _litellm_available and not self._use_direct_api:
+                # Handle LiteLLM exceptions
+                if hasattr(litellm, 'RateLimitError') and isinstance(e, litellm.RateLimitError):
+                    raise LLMRequestFailedError("LLM request failed: Rate limit exceeded", str(e)) from e
+                elif hasattr(litellm, 'AuthenticationError') and isinstance(e, litellm.AuthenticationError):
+                    raise LLMRequestFailedError("LLM request failed: Invalid API key", str(e)) from e
+                elif hasattr(litellm, 'NotFoundError') and isinstance(e, litellm.NotFoundError):
+                    raise LLMRequestFailedError("LLM request failed: Model not found", str(e)) from e
+                elif hasattr(litellm, 'ContextWindowExceededError') and isinstance(e, litellm.ContextWindowExceededError):
+                    raise LLMRequestFailedError("LLM request failed: Context too long", str(e)) from e
+                elif hasattr(litellm, 'ServiceUnavailableError') and isinstance(e, litellm.ServiceUnavailableError):
+                    raise LLMRequestFailedError("LLM request failed: Service unavailable", str(e)) from e
+                elif hasattr(litellm, 'Timeout') and isinstance(e, litellm.Timeout):
+                    raise LLMRequestFailedError("LLM request failed: Request timed out", str(e)) from e
+                elif hasattr(litellm, 'APIError') and isinstance(e, litellm.APIError):
+                    raise LLMRequestFailedError("LLM request failed: API error", str(e)) from e
             raise LLMRequestFailedError(f"LLM request failed: {type(e).__name__}", str(e)) from e
 
     @property
@@ -455,9 +472,14 @@ class LLM:
         }
 
     def get_cache_config(self) -> dict[str, bool]:
+        if self._use_direct_api:
+            return {
+                "enabled": False,
+                "supported": False,
+            }
         return {
             "enabled": self.config.enable_prompt_caching,
-            "supported": supports_prompt_caching(self.config.model_name),
+            "supported": supports_prompt_caching(self.config.model_name) if _litellm_available else False,
         }
 
     def _should_include_stop_param(self) -> bool:
@@ -476,7 +498,9 @@ class LLM:
         if not self.config.model_name:
             return False
         try:
-            return bool(supports_vision(model=self.config.model_name))
+            if self._use_direct_api:
+                return direct_supports_vision(self.config.model_name)
+            return bool(supports_vision(model=self.config.model_name)) if _litellm_available else False
         except Exception:  # noqa: BLE001
             return False
 
@@ -519,10 +543,38 @@ class LLM:
             filtered_messages.append(updated_msg)
         return filtered_messages
 
+    async def _make_direct_request(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> DirectAPIResponse:
+        """Make a request using the direct API client."""
+        if not self._model_supports_vision():
+            messages = self._filter_images_from_messages(messages)
+        
+        stop_param = ["</function>"] if self._should_include_stop_param() else None
+        
+        response = await self._direct_client.chat_completion_async(
+            messages=messages,
+            model=self.config.model_name,
+            stop=stop_param,
+        )
+        
+        self._total_stats.requests += 1
+        self._last_request_stats = RequestStats(requests=1)
+        
+        return response
+
     async def _make_request(
         self,
         messages: list[dict[str, Any]],
-    ) -> ModelResponse:
+    ) -> Any:  # Returns ModelResponse when litellm is available
+        """Make a request using LiteLLM."""
+        if not _litellm_available:
+            raise LLMRequestFailedError(
+                "LiteLLM is not available. Use direct API mode instead.",
+                "Install litellm or set STRIX_DIRECT_API_MODE=true"
+            )
+            
         if not self._model_supports_vision():
             messages = self._filter_images_from_messages(messages)
 
@@ -554,50 +606,66 @@ class LLM:
 
         return response
 
-    def _update_usage_stats(self, response: ModelResponse) -> None:
+    def _update_usage_stats(self, response: Any) -> None:
         try:
-            if hasattr(response, "usage") and response.usage:
-                input_tokens = getattr(response.usage, "prompt_tokens", 0)
-                output_tokens = getattr(response.usage, "completion_tokens", 0)
-
+            if self._use_direct_api:
+                # Handle DirectAPIResponse
+                if hasattr(response, 'usage'):
+                    usage = response.usage
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    output_tokens = usage.get("completion_tokens", 0)
+                else:
+                    input_tokens = 0
+                    output_tokens = 0
                 cached_tokens = 0
                 cache_creation_tokens = 0
-
-                if hasattr(response.usage, "prompt_tokens_details"):
-                    prompt_details = response.usage.prompt_tokens_details
-                    if hasattr(prompt_details, "cached_tokens"):
-                        cached_tokens = prompt_details.cached_tokens or 0
-
-                if hasattr(response.usage, "cache_creation_input_tokens"):
-                    cache_creation_tokens = response.usage.cache_creation_input_tokens or 0
-
+                cost = 0.0  # Direct API doesn't track cost
             else:
-                input_tokens = 0
-                output_tokens = 0
-                cached_tokens = 0
-                cache_creation_tokens = 0
+                # Handle LiteLLM ModelResponse
+                if hasattr(response, "usage") and response.usage:
+                    input_tokens = getattr(response.usage, "prompt_tokens", 0)
+                    output_tokens = getattr(response.usage, "completion_tokens", 0)
 
-            try:
-                cost = completion_cost(response) or 0.0
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"Failed to calculate cost: {e}")
-                cost = 0.0
+                    cached_tokens = 0
+                    cache_creation_tokens = 0
+
+                    if hasattr(response.usage, "prompt_tokens_details"):
+                        prompt_details = response.usage.prompt_tokens_details
+                        if hasattr(prompt_details, "cached_tokens"):
+                            cached_tokens = prompt_details.cached_tokens or 0
+
+                    if hasattr(response.usage, "cache_creation_input_tokens"):
+                        cache_creation_tokens = response.usage.cache_creation_input_tokens or 0
+
+                else:
+                    input_tokens = 0
+                    output_tokens = 0
+                    cached_tokens = 0
+                    cache_creation_tokens = 0
+
+                try:
+                    cost = completion_cost(response) or 0.0 if _litellm_available else 0.0
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"Failed to calculate cost: {e}")
+                    cost = 0.0
 
             self._total_stats.input_tokens += input_tokens
             self._total_stats.output_tokens += output_tokens
-            self._total_stats.cached_tokens += cached_tokens
-            self._total_stats.cache_creation_tokens += cache_creation_tokens
+            if not self._use_direct_api:
+                self._total_stats.cached_tokens += cached_tokens
+                self._total_stats.cache_creation_tokens += cache_creation_tokens
             self._total_stats.cost += cost
 
             self._last_request_stats.input_tokens = input_tokens
             self._last_request_stats.output_tokens = output_tokens
-            self._last_request_stats.cached_tokens = cached_tokens
-            self._last_request_stats.cache_creation_tokens = cache_creation_tokens
+            if not self._use_direct_api:
+                self._last_request_stats.cached_tokens = cached_tokens
+                self._last_request_stats.cache_creation_tokens = cache_creation_tokens
             self._last_request_stats.cost = cost
 
-            if cached_tokens > 0:
+            if not self._use_direct_api and cached_tokens > 0:
                 logger.info(f"Cache hit: {cached_tokens} cached tokens, {input_tokens} new tokens")
-            if cache_creation_tokens > 0:
+            if not self._use_direct_api and cache_creation_tokens > 0:
                 logger.info(f"Cache creation: {cache_creation_tokens} tokens written to cache")
 
             logger.info(f"Usage stats: {self.usage_stats}")

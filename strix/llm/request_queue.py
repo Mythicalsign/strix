@@ -6,12 +6,22 @@ import time
 from collections import deque
 from typing import Any
 
-import litellm
-from litellm import ModelResponse, completion
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+
+from strix.llm.direct_api import is_direct_api_mode
 
 
 logger = logging.getLogger(__name__)
+
+# Conditional import of litellm
+_litellm_available = False
+try:
+    if not is_direct_api_mode():
+        import litellm
+        from litellm import ModelResponse, completion
+        _litellm_available = True
+except ImportError:
+    pass
 
 
 class RateLimiter:
@@ -81,6 +91,11 @@ class RateLimiter:
 
 
 def should_retry_exception(exception: Exception) -> bool:
+    """Determine if an exception should be retried."""
+    if not _litellm_available:
+        # For direct API mode, always check error type
+        return hasattr(exception, 'status_code') and exception.status_code >= 500
+    
     status_code = None
 
     if hasattr(exception, "status_code"):
@@ -145,7 +160,7 @@ class LLMRequestQueue:
             f"delay={delay_between_requests}s, max_rpm={max_requests_per_minute}"
         )
 
-    async def make_request(self, completion_args: dict[str, Any]) -> ModelResponse:
+    async def make_request(self, completion_args: dict[str, Any]) -> Any:
         """Make an LLM request with rate limiting and concurrency control.
         
         This method:
@@ -153,7 +168,15 @@ class LLMRequestQueue:
         2. Acquires the concurrency semaphore
         3. Applies minimal delay between requests
         4. Makes the actual request with retry logic
+        
+        Returns ModelResponse when using LiteLLM, or dict for direct API.
         """
+        if not _litellm_available:
+            raise RuntimeError(
+                "LiteLLM is not available. Use direct API mode by setting "
+                "STRIX_DIRECT_API_MODE=true"
+            )
+            
         try:
             # Check rate limiter first
             rate_wait = self._rate_limiter.acquire()
@@ -208,7 +231,11 @@ class LLMRequestQueue:
         retry=retry_if_exception(should_retry_exception),
         reraise=True,
     )
-    async def _reliable_request(self, completion_args: dict[str, Any]) -> ModelResponse:
+    async def _reliable_request(self, completion_args: dict[str, Any]) -> Any:
+        """Make a reliable request with retries."""
+        if not _litellm_available:
+            raise RuntimeError("LiteLLM not available")
+            
         response = completion(**completion_args, stream=False)
         if isinstance(response, ModelResponse):
             return response
@@ -223,6 +250,7 @@ _global_queue: LLMRequestQueue | None = None
 
 
 def get_global_queue() -> LLMRequestQueue:
+    """Get or create the global request queue."""
     global _global_queue  # noqa: PLW0603
     if _global_queue is None:
         _global_queue = LLMRequestQueue()

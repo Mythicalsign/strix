@@ -2,7 +2,22 @@ import logging
 import os
 from typing import Any
 
-import litellm
+from strix.llm.direct_api import (
+    DirectAPIClient,
+    DirectAPIError,
+    get_direct_api_client,
+    is_direct_api_mode,
+    token_counter as direct_token_counter,
+)
+
+# Conditional import of litellm
+_litellm_available = False
+try:
+    if not is_direct_api_mode():
+        import litellm
+        _litellm_available = True
+except ImportError:
+    pass
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +58,10 @@ keeping the summary concise and to the point."""
 
 
 def _count_tokens(text: str, model: str) -> int:
+    """Count tokens in text."""
     try:
+        if is_direct_api_mode() or not _litellm_available:
+            return direct_token_counter(text)
         count = litellm.token_counter(model=model, text=text)
         return int(count)
     except Exception:
@@ -87,6 +105,7 @@ def _summarize_messages(
     model: str,
     timeout: int = 600,
 ) -> dict[str, Any]:
+    """Summarize messages using either direct API or LiteLLM."""
     if not messages:
         empty_summary = "<context_summary message_count='0'>{text}</context_summary>"
         return {
@@ -104,14 +123,25 @@ def _summarize_messages(
     prompt = SUMMARY_PROMPT_TEMPLATE.format(conversation=conversation)
 
     try:
-        completion_args = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "timeout": timeout,
-        }
+        if is_direct_api_mode() or not _litellm_available:
+            # Use direct API
+            client = get_direct_api_client()
+            response = client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+            )
+            summary = response.content or ""
+        else:
+            # Use LiteLLM
+            completion_args = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "timeout": timeout,
+            }
 
-        response = litellm.completion(**completion_args)
-        summary = response.choices[0].message.content or ""
+            response = litellm.completion(**completion_args)
+            summary = response.choices[0].message.content or ""
+            
         if not summary.strip():
             return messages[0]
         summary_msg = "<context_summary message_count='{count}'>{text}</context_summary>"
