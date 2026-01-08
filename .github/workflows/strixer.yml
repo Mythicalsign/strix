@@ -327,7 +327,7 @@ jobs:
           
           # Verify installation with proper error detection
           echo "Verifying Strix installation..."
-          if ! python -c "from strix.interface.main import app; print('Strix CLI loaded successfully')"; then
+          if ! python -c "from strix.interface.main import main; print('Strix CLI loaded successfully')"; then
             echo "::error::Strix installation verification failed!"
             echo "Checking for missing dependencies..."
             python -c "import jinja2; print('jinja2 OK')" || echo "::error::jinja2 missing"
