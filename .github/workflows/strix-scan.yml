@@ -187,26 +187,23 @@ jobs:
           set -euo pipefail
           echo "::group::Configuring CLIProxyAPI"
           AUTH_DIR="$HOME/.cli-proxy-api"
-          cat > "$AUTH_DIR/config.yaml" << EOF
+          cat > "$AUTH_DIR/config.yaml" << 'EOF'
+          host: "127.0.0.1"
           port: 8317
-          auth-dir: "$AUTH_DIR"
-          providers:
-            qwen:
-              enabled: true
-              load-balance: true
-              round-robin: true
-              health-check: true
-              auto-refresh: true
+          auth-dir: "~/.cli-proxy-api"
+          debug: true
+          logging-to-file: true
+          request-retry: 5
+          max-retry-interval: 60
           quota-exceeded:
             switch-project: true
             switch-preview-model: true
-          request-retry: 5
-          timeout: "600s"
-          logging-to-file: true
-          verbose: true
+          routing:
+            strategy: "round-robin"
           EOF
           sed -i 's/^          //' "$AUTH_DIR/config.yaml"
-          echo "Configuration created at $AUTH_DIR/config.yaml"
+          echo "Configuration created:"
+          cat "$AUTH_DIR/config.yaml"
           echo "::endgroup::"
 
       - name: Start CLIProxyAPI Server
@@ -216,24 +213,40 @@ jobs:
           echo "::group::Starting CLIProxyAPI Server"
           AUTH_DIR="$HOME/.cli-proxy-api"
           cd "$AUTH_DIR"
+          
+          # List token files for debugging
+          echo "Token files found:"
+          ls -la qwen-*.json 2>/dev/null || echo "No qwen token files found!"
+          
           nohup cli-proxy-api -config config.yaml > cliproxy.log 2>&1 &
           SERVER_PID=$!
           echo "$SERVER_PID" > cliproxy.pid
-          sleep 10
+          sleep 15
+          
           if ! kill -0 $SERVER_PID 2>/dev/null; then
             echo "::error::CLIProxyAPI failed to start"
             cat cliproxy.log || echo "No log file"
             exit 1
           fi
-          for i in {1..12}; do
-            if curl -s "http://localhost:${{ env.CLIPROXY_PORT }}/v1/models" > /dev/null 2>&1; then
-              echo "CLIProxyAPI is ready"
+          
+          # Wait for server to be ready
+          for i in {1..20}; do
+            MODELS_RESPONSE=$(curl -s "http://127.0.0.1:${{ env.CLIPROXY_PORT }}/v1/models" 2>/dev/null || true)
+            if [ -n "$MODELS_RESPONSE" ] && echo "$MODELS_RESPONSE" | jq -e '.data' > /dev/null 2>&1; then
+              echo "CLIProxyAPI is ready!"
+              echo "Available models:"
+              echo "$MODELS_RESPONSE" | jq -r '.data[].id' 2>/dev/null | head -20 || true
               break
             fi
-            echo "Waiting for CLIProxyAPI... (attempt $i/12)"
-            sleep 5
+            echo "Waiting for CLIProxyAPI... (attempt $i/20)"
+            sleep 3
           done
-          ENDPOINT="http://localhost:${{ env.CLIPROXY_PORT }}/v1"
+          
+          # Show startup logs
+          echo "CLIProxyAPI startup logs:"
+          head -50 cliproxy.log || true
+          
+          ENDPOINT="http://127.0.0.1:${{ env.CLIPROXY_PORT }}/v1"
           echo "endpoint=$ENDPOINT" >> "$GITHUB_OUTPUT"
           echo "pid=$SERVER_PID" >> "$GITHUB_OUTPUT"
           echo "=========================================="
@@ -245,8 +258,15 @@ jobs:
           
       - name: Export LiteLLM provider for Strix
         run: |
+          echo "::group::Setting up LiteLLM environment"
+          # LiteLLM needs these to use the OpenAI-compatible CLIProxyAPI
           echo "CUSTOM_LLM_PROVIDER=openai" >> "$GITHUB_ENV"
           echo "LITELLM_CUSTOM_API_BASE=${{ steps.cliproxy.outputs.endpoint }}" >> "$GITHUB_ENV"
+          
+          # Test the endpoint before proceeding
+          echo "Testing CLIProxyAPI endpoint..."
+          curl -s "${{ steps.cliproxy.outputs.endpoint }}/models" | jq '.data | length' || echo "Could not get model count"
+          echo "::endgroup::"
 
       - name: Install Strix
         run: |
@@ -589,9 +609,10 @@ jobs:
           STRIX_DASHBOARD_PORT: ${{ env.DASHBOARD_PORT }}
           # Set LiteLLM to drop unsupported params for better compatibility
           LITELLM_DROP_PARAMS: 'true'
-          # Add retry configuration for LiteLLM
-          LITELLM_NUM_RETRIES: '5'
-          LITELLM_RETRY_DELAY: '2'
+          # Add retry configuration for LiteLLM - increased for stability
+          LITELLM_NUM_RETRIES: '10'
+          LITELLM_RETRY_DELAY: '5'
+          LITELLM_REQUEST_TIMEOUT: '300'
           # Shared state file for dashboard updates
           STRIX_DASHBOARD_STATE_FILE: /tmp/strix_dashboard_state.json
           # Enable host network mode for Docker container to allow access to host services
@@ -620,10 +641,20 @@ jobs:
           echo "Scan Mode: $SCAN_MODE"
           echo "Model: openai/${{ github.event.inputs.model || 'qwen3-coder-plus' }}"
           echo "Accounts: ${{ steps.decrypt.outputs.token_count }}"
+          echo "LLM Endpoint: ${{ steps.cliproxy.outputs.endpoint }}"
           if [ -n "${{ steps.tunnel.outputs.dashboard_url }}" ]; then
             echo "Dashboard: ${{ steps.tunnel.outputs.dashboard_url }}"
           fi
           echo "=========================================="
+          
+          # Verify CLIProxyAPI is still running before starting scan
+          echo "Verifying CLIProxyAPI status..."
+          if ! curl -s "${{ steps.cliproxy.outputs.endpoint }}/models" > /dev/null 2>&1; then
+            echo "::warning::CLIProxyAPI may not be responding. Checking logs..."
+            cat ~/.cli-proxy-api/cliproxy.log | tail -20 || true
+          else
+            echo "CLIProxyAPI is responding."
+          fi
           
           # Create a wrapper script that handles retries at the scan level
           cd "$GITHUB_WORKSPACE"
@@ -636,26 +667,40 @@ jobs:
             CMD="$CMD --instruction \"$INSTRUCTIONS\""
           fi
           
-          # Run with retry logic for LLM failures
-          MAX_RETRIES=3
+          # Run with retry logic for LLM failures - reduced retries to save time
+          MAX_RETRIES=2
           RETRY_COUNT=0
           SUCCESS=false
           
           while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
             echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES"
+            echo "Starting scan at $(date)"
             
             # Run scan with timeout
             timeout ${TIMEFRAME}m bash -c "$CMD" 2>&1 | tee strix_output.log
             EXIT_CODE=${PIPESTATUS[0]}
             
             # Check if it was an LLM error that we should retry
-            if grep -qi "Internal server error\|rate limit\|quota exceeded\|connection reset" strix_output.log; then
+            if grep -qi "Internal server error\|rate limit\|quota exceeded\|connection reset\|ETIMEDOUT\|ECONNREFUSED" strix_output.log; then
               RETRY_COUNT=$((RETRY_COUNT + 1))
               if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "LLM error detected, waiting 30 seconds before retry..."
-                sleep 30
+                echo "LLM error detected at $(date)"
+                echo "Error details from log:"
+                grep -i "error\|failed\|exception" strix_output.log | tail -10 || true
+                
+                # Check CLIProxyAPI status
+                echo "Checking CLIProxyAPI status..."
+                curl -s "${{ steps.cliproxy.outputs.endpoint }}/models" | jq '.data | length' || echo "CLIProxyAPI not responding!"
+                
+                # Show recent CLIProxyAPI logs
+                echo "Recent CLIProxyAPI logs:"
+                tail -30 ~/.cli-proxy-api/cliproxy.log || true
+                
+                echo "Waiting 15 seconds before retry..."
+                sleep 15
+                
                 # Reduce timeframe for subsequent retries
-                REMAINING_TIME=$((TIMEFRAME - 2))
+                REMAINING_TIME=$((TIMEFRAME - 1))
                 if [ $REMAINING_TIME -gt 5 ]; then
                   TIMEFRAME=$REMAINING_TIME
                 fi
