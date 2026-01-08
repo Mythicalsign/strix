@@ -330,6 +330,8 @@ jobs:
           })
           
           last_mtime = 0
+          last_content_hash = None
+          update_count = 0
           
           # Keep running and monitor state file for updates
           while True:
@@ -339,10 +341,28 @@ jobs:
                       mtime = Path(STATE_FILE).stat().st_mtime
                       if mtime > last_mtime:
                           last_mtime = mtime
-                          with open(STATE_FILE, 'r') as f:
-                              external_state = json.load(f)
-                          if external_state:
-                              update_dashboard_state(external_state)
+                          try:
+                              with open(STATE_FILE, 'r') as f:
+                                  content = f.read()
+                              if content and content.strip():
+                                  # Check if content actually changed (not just mtime)
+                                  content_hash = hash(content)
+                                  if content_hash != last_content_hash:
+                                      last_content_hash = content_hash
+                                      external_state = json.loads(content)
+                                      if external_state and isinstance(external_state, dict):
+                                          # Log state updates periodically
+                                          update_count += 1
+                                          if update_count % 10 == 1:  # Log every 10th update
+                                              agents_count = len(external_state.get('agents', {}))
+                                              tools_count = len(external_state.get('tool_executions', []))
+                                              vulns_count = len(external_state.get('vulnerabilities', []))
+                                              print(f"State update #{update_count}: agents={agents_count}, tools={tools_count}, vulns={vulns_count}")
+                                          update_dashboard_state(external_state)
+                          except json.JSONDecodeError as je:
+                              print(f"JSON parse error: {je}")
+                          except Exception as re:
+                              print(f"State file read error: {re}")
                   
                   # Update time tracking
                   elapsed = (datetime.now(UTC) - start_time).total_seconds() / 60.0

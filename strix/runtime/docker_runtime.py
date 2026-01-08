@@ -33,6 +33,8 @@ PASSED_ENV_VARS = [
     # CI/CD markers
     "CI",
     "GITHUB_ACTIONS",
+    # Dashboard state file for CI/CD dashboard integration
+    "STRIX_DASHBOARD_STATE_FILE",
 ]
 
 
@@ -154,6 +156,14 @@ class DockerRuntime(AbstractRuntime):
                     # This allows the container to access localhost services on the host
                     run_kwargs["network_mode"] = "host"
                     logger.info("Using host network mode for CI connectivity")
+                    
+                    # Mount /tmp directory to share dashboard state file with host
+                    # This allows the external dashboard to read state updates from Strix
+                    state_file = os.getenv("STRIX_DASHBOARD_STATE_FILE")
+                    if state_file:
+                        state_dir = str(Path(state_file).parent)
+                        run_kwargs["volumes"] = {state_dir: {"bind": state_dir, "mode": "rw"}}
+                        logger.info(f"Mounting {state_dir} for dashboard state file access")
                 else:
                     # Standard bridge networking with port forwarding
                     run_kwargs["hostname"] = f"strix-scan-{scan_id}"
