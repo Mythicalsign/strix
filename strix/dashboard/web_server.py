@@ -49,6 +49,13 @@ _web_dashboard_state: dict[str, Any] = {
         "request_count": 0,
         "api_calls": 0,
     },
+    "rate_limiter": {
+        "current_rate": 0,
+        "max_rate": 60,
+        "remaining_capacity": 60,
+        "total_requests": 0,
+        "total_wait_time": 0.0,
+    },
     "time": {
         "start_time": None,
         "duration_minutes": 60,
@@ -941,12 +948,40 @@ def get_dashboard_html() -> str:
             <div class="panel">
                 <div class="panel-header">
                     <i class="fas fa-chart-pie mr-2"></i>
-                    Resource Usage
+                    Resource Usage & Rate Limiter
                 </div>
                 <div class="p-4">
+                    <!-- Rate Limiter Stats (Prominent) -->
+                    <div class="mb-4 p-3 rounded" style="background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3);">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm font-semibold strix-text">
+                                <i class="fas fa-tachometer-alt mr-2"></i>Rate Limiter (60 req/min max)
+                            </span>
+                            <span id="rateStatus" class="text-xs px-2 py-1 rounded bg-green-900 text-green-300">OK</span>
+                        </div>
+                        <div class="progress-bar mb-2">
+                            <div id="rateProgress" class="progress-fill" style="width: 0%"></div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 text-xs">
+                            <div class="text-center">
+                                <div class="text-lg font-bold strix-text" id="currentRate">0</div>
+                                <div class="text-gray-500">Req/min</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-lg font-bold text-blue-400" id="remainingCapacity">60</div>
+                                <div class="text-gray-500">Remaining</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-lg font-bold text-yellow-400" id="totalWaitTime">0s</div>
+                                <div class="text-gray-500">Wait Time</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Token & Cost Stats -->
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <div class="text-sm text-gray-500 mb-1">API Calls</div>
+                            <div class="text-sm text-gray-500 mb-1">Total Requests</div>
                             <div class="text-2xl font-bold strix-text" id="resApiCalls">0</div>
                         </div>
                         <div>
@@ -966,7 +1001,7 @@ def get_dashboard_html() -> str:
                             <div class="text-lg text-yellow-400" id="resCachedTokens">0</div>
                         </div>
                         <div>
-                            <div class="text-sm text-gray-500 mb-1">Requests</div>
+                            <div class="text-sm text-gray-500 mb-1">Avg Req/min</div>
                             <div class="text-lg" id="resRequests">0</div>
                         </div>
                     </div>
@@ -1073,6 +1108,9 @@ def get_dashboard_html() -> str:
             
             // Update resources
             updateResources(state.resources);
+            
+            // Update rate limiter
+            updateRateLimiter(state.rate_limiter);
         }
         
         function updateTimePanel(time) {
@@ -1363,6 +1401,42 @@ def get_dashboard_html() -> str:
             document.getElementById('resOutputTokens').textContent = formatNumber(res.output_tokens || 0);
             document.getElementById('resCachedTokens').textContent = formatNumber(res.cached_tokens || 0);
             document.getElementById('resRequests').textContent = formatNumber(res.request_count || res.requests || 0);
+        }
+        
+        function updateRateLimiter(rate) {
+            if (!rate) return;
+            
+            const currentRate = rate.current_rate || 0;
+            const maxRate = rate.max_rate || 60;
+            const remaining = rate.remaining_capacity || maxRate;
+            const waitTime = rate.total_wait_time || 0;
+            
+            // Update values
+            document.getElementById('currentRate').textContent = currentRate;
+            document.getElementById('remainingCapacity').textContent = remaining;
+            document.getElementById('totalWaitTime').textContent = waitTime.toFixed(1) + 's';
+            
+            // Update progress bar
+            const progress = document.getElementById('rateProgress');
+            const percentage = (currentRate / maxRate) * 100;
+            progress.style.width = percentage + '%';
+            
+            // Update status and colors
+            const status = document.getElementById('rateStatus');
+            progress.className = 'progress-fill';
+            
+            if (currentRate >= maxRate * 0.9) {
+                status.textContent = 'THROTTLED';
+                status.className = 'text-xs px-2 py-1 rounded bg-red-900 text-red-300';
+                progress.classList.add('critical');
+            } else if (currentRate >= maxRate * 0.7) {
+                status.textContent = 'HIGH';
+                status.className = 'text-xs px-2 py-1 rounded bg-yellow-900 text-yellow-300';
+                progress.classList.add('warning');
+            } else {
+                status.textContent = 'OK';
+                status.className = 'text-xs px-2 py-1 rounded bg-green-900 text-green-300';
+            }
         }
         
         function formatNumber(num) {
