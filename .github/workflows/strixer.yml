@@ -1076,15 +1076,27 @@ jobs:
           SUMMARY_EOF
           
           # Add dashboard info if available
+          DASHBOARD_URL="${{ steps.tunnel.outputs.dashboard_url }}"
           if [ -n "$DASHBOARD_URL" ]; then
             cat >> "$GITHUB_STEP_SUMMARY" << DASHEOF
           
           ### 🌐 Live Dashboard
           
-          The real-time web dashboard was available at:
-          \`$DASHBOARD_URL\`
+          **The real-time advanced Next.js dashboard was available at:**
           
-          *(Dashboard URL is only active during the scan)*
+          🔗 **[$DASHBOARD_URL]($DASHBOARD_URL)**
+          
+          > **Click the link above to access the dashboard** (URL is only active during the scan)
+          
+          **Features Available:**
+          - ✅ Real-time agent activity monitoring
+          - ✅ **Advanced collaboration network graph** 🆕
+          - ✅ Vulnerability discovery tracking
+          - ✅ Tool execution history with details
+          - ✅ Resource usage analytics (tokens, cost over time)
+          - ✅ Multi-agent collaboration view
+          - ✅ Export functionality (JSON/CSV)
+          - ✅ Historical data visualization
           
           DASHEOF
           fi
