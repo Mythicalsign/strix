@@ -156,8 +156,10 @@ export function CollaborationNetworkGraph({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const width = canvas.width = canvas.offsetWidth
-    const height = canvas.height = Math.max(400, nodes.length * 30)
+    // Set canvas dimensions
+    const rect = canvas.getBoundingClientRect()
+    const width = canvas.width = rect.width || 800
+    const height = canvas.height = Math.max(400, nodes.length * 30 || 400)
 
     // Clear canvas
     ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'
