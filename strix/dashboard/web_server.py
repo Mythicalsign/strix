@@ -189,14 +189,34 @@ def add_tool_execution(tool_data: dict[str, Any]) -> None:
         if len(_web_dashboard_state["tool_executions"]) > 200:
             _web_dashboard_state["tool_executions"] = _web_dashboard_state["tool_executions"][-200:]
         
-        # Also add to live feed
-        add_live_feed_entry({
+        # Also add to live feed with enhanced information
+        status = tool_data.get("status", "running")
+        duration = tool_data.get("duration_seconds")
+        error_msg = tool_data.get("error_message")
+        
+        # Format duration for display
+        duration_str = ""
+        if duration is not None:
+            if duration < 1:
+                duration_str = f" ({duration*1000:.0f}ms)"
+            else:
+                duration_str = f" ({duration:.2f}s)"
+        
+        # Create feed entry
+        feed_entry = {
             "type": "tool_execution",
             "tool_name": tool_data.get("tool_name", "unknown"),
-            "status": tool_data.get("status", "running"),
+            "status": status,
             "agent_id": tool_data.get("agent_id"),
             "args_summary": _summarize_args(tool_data.get("args", {})),
-        })
+            "duration": duration_str,
+        }
+        
+        # Add error information if failed
+        if status == "failed" and error_msg:
+            feed_entry["error"] = error_msg[:100] + ("..." if len(error_msg) > 100 else "")
+        
+        add_live_feed_entry(feed_entry)
 
 
 def add_chat_message(message: dict[str, Any]) -> None:
