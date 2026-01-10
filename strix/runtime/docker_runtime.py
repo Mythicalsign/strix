@@ -16,7 +16,13 @@ from .runtime import AbstractRuntime, SandboxInfo
 
 STRIX_IMAGE = os.getenv("STRIX_IMAGE", "ghcr.io/usestrix/strix-sandbox:0.1.10")
 # Enable host networking in CI environments for proper connectivity
-USE_HOST_NETWORK = os.getenv("STRIX_USE_HOST_NETWORK", "false").lower() == "true"
+# Auto-detect CI environment if STRIX_USE_HOST_NETWORK is not explicitly set
+_ci_env = os.getenv("CI", "").lower() == "true" or os.getenv("GITHUB_ACTIONS", "").lower() == "true"
+USE_HOST_NETWORK = os.getenv("STRIX_USE_HOST_NETWORK", str(_ci_env).lower()).lower() == "true"
+
+# DNS servers to use when not using host network (public DNS for reliability)
+FALLBACK_DNS_SERVERS = ["8.8.8.8", "8.8.4.4", "1.1.1.1"]
+
 logger = logging.getLogger(__name__)
 
 # Environment variables to pass to the container for external service connectivity
@@ -173,6 +179,10 @@ class DockerRuntime(AbstractRuntime):
                     }
                     # Add extra_hosts to allow container to reach host services
                     run_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
+                    # Configure DNS for reliable external connectivity
+                    # This helps with networking issues when inside Docker container
+                    run_kwargs["dns"] = FALLBACK_DNS_SERVERS
+                    logger.info(f"Using bridge network with DNS servers: {FALLBACK_DNS_SERVERS}")
                 
                 container = self.client.containers.run(**run_kwargs)
 
